@@ -310,7 +310,7 @@ curl -fsS -X PUT "http://${BIND_ADDR}:${SYNAPSE_PORT}/_matrix/client/v3/profile/
 
 AVATAR_FILE="${ELEMENT_DIR}/assets/rumi-mark-white-square.png"
 CURRENT_AVATAR="$(curl -fsS "http://${BIND_ADDR}:${SYNAPSE_PORT}/_matrix/client/v3/profile/${BOT_USER_ID}/avatar_url" 2>/dev/null \
-  | python3 -c "import json,sys; print(json.load(sys.stdin).get('avatar_url',''))" 2>/dev/null || true)"
+  | python3 -c "import json,sys; print(json.load(sys.stdin).get('avatar_url') or '')" 2>/dev/null || true)"
 if [[ -n "${CURRENT_AVATAR}" ]]; then
   log "  avatar already set (${CURRENT_AVATAR}), skipping upload"
 elif [[ -f "${AVATAR_FILE}" ]]; then
