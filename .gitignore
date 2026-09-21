@@ -3,6 +3,7 @@ deploy/.env
 deploy/rumi-channel.env
 deploy/element/config.json
 deploy/element/welcome.html
+deploy/element/home.html
 .env
 node_modules/
 *.log

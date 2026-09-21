@@ -137,18 +137,33 @@ WELCOME_OK=0; [[ "${WELCOME}" == "@rumi:${SERVER_NAME}" ]] && WELCOME_OK=1
 check "Element config.json brand == \"Rumi\"" "${BRAND_OK}" "got brand='${BRAND}'"
 check "Element config.json welcome_user_id == @rumi:${SERVER_NAME}" "${WELCOME_OK}" "got welcome_user_id='${WELCOME}'"
 
-# welcome.html must be the RENDERED file (setup.sh substitutes __SERVER_NAME__ /
-# __PUBLIC_BASE_URL__ from welcome.template.html) -- Element's HTML sanitizer blocks any
-# client-side templating, so a literal placeholder reaching the browser is a real bug, not
-# cosmetic.
+# welcome.html (logged-out, #/welcome) must be the RENDERED file (setup.sh substitutes
+# __SERVER_NAME__ / __PUBLIC_BASE_URL__ from welcome.template.html) -- Element's HTML sanitizer
+# blocks any client-side templating, so a literal placeholder reaching the browser is a real bug,
+# not cosmetic. It no longer references @rumi directly (a logged-out, disable_guests visitor
+# can't open a chat pre-auth) -- it points to register/login instead, so this check only proves
+# the template rendered, not raw placeholder text.
 WELCOME_HTML="$(curl -fsS "${ELEMENT_URL}/welcome.html" 2>/dev/null || true)"
 WELCOME_HTML_OK=0
 if [[ -n "${WELCOME_HTML}" ]] \
-  && echo "${WELCOME_HTML}" | grep -qF "@rumi:${SERVER_NAME}" \
+  && echo "${WELCOME_HTML}" | grep -qF "#/register" \
   && ! echo "${WELCOME_HTML}" | grep -qF "__SERVER_NAME__"; then
   WELCOME_HTML_OK=1
 fi
-check "Element welcome.html rendered (@rumi:${SERVER_NAME}, no __SERVER_NAME__ placeholder)" "${WELCOME_HTML_OK}" \
+check "Element welcome.html rendered (#/register link, no __SERVER_NAME__ placeholder)" "${WELCOME_HTML_OK}" \
+  "empty response, missing #/register, or literal __SERVER_NAME__ still present"
+
+# home.html (logged-in, no-rooms #/home) is where the @rumi:<server> reference now lives (setup.sh
+# substitutes it from home.template.html) -- this is the real "one tap to Rumi" placement surface
+# once welcome_user_id was found to be dead code upstream (see docs/DECISIONS.tsv).
+HOME_HTML="$(curl -fsS "${ELEMENT_URL}/home.html" 2>/dev/null || true)"
+HOME_HTML_OK=0
+if [[ -n "${HOME_HTML}" ]] \
+  && echo "${HOME_HTML}" | grep -qF "@rumi:${SERVER_NAME}" \
+  && ! echo "${HOME_HTML}" | grep -qF "__SERVER_NAME__"; then
+  HOME_HTML_OK=1
+fi
+check "Element home.html rendered (@rumi:${SERVER_NAME}, no __SERVER_NAME__ placeholder)" "${HOME_HTML_OK}" \
   "empty response, missing @rumi:${SERVER_NAME}, or literal __SERVER_NAME__ still present"
 
 # ---------------------------------------------------------------------------

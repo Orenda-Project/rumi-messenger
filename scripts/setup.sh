@@ -354,7 +354,7 @@ fi
 # ---------------------------------------------------------------------------
 # Step 8: render Element config + welcome page from the branded templates
 # ---------------------------------------------------------------------------
-log "Step 8/9: rendering deploy/element/{config.json,welcome.html}"
+log "Step 8/9: rendering deploy/element/{config.json,welcome.html,home.html}"
 
 # Substitutes the literal placeholders __SERVER_NAME__ / __PUBLIC_BASE_URL__ in a template file
 # and writes the result. Used for both config.template.json -> config.json and
@@ -420,8 +420,32 @@ if [[ "${CLEANUP_WELCOME_TEMPLATE}" == "1" ]]; then
   rm -f "${WELCOME_TEMPLATE}"
 fi
 
-log "  starting element"
-dc up -d element
+HOME_TEMPLATE="${ELEMENT_DIR}/home.template.html"
+CLEANUP_HOME_TEMPLATE=0
+if [[ ! -f "${HOME_TEMPLATE}" ]]; then
+  log "  WARNING: home.template.html missing (branding agent hasn't written it yet)"
+  log "  using a throwaway minimal template for this test run only (not committed)"
+  HOME_TEMPLATE="$(mktemp)"
+  CLEANUP_HOME_TEMPLATE=1
+  cat > "${HOME_TEMPLATE}" <<'HOMEEOF'
+<!DOCTYPE html>
+<html><head><title>Rumi Messenger</title></head>
+<body><p>Placeholder home page -- replaced by the branding work package.
+<a href="#/user/@rumi:__SERVER_NAME__?action=chat">Talk to Rumi</a></p></body></html>
+HOMEEOF
+fi
+render_template "${HOME_TEMPLATE}" "${ELEMENT_DIR}/home.html"
+if [[ "${CLEANUP_HOME_TEMPLATE}" == "1" ]]; then
+  rm -f "${HOME_TEMPLATE}"
+fi
+
+# --force-recreate: a plain `up -d` no-ops on a container that's already running with the same
+# image/config hash even though config.json/welcome.html/home.html were just rewritten in place --
+# a prior review caught the live container still serving a stale inode after a rename/rewrite.
+# Force-recreating guarantees the container's bind mounts are re-resolved against the freshly
+# rendered files every run, not just on first create.
+log "  starting element (force-recreate so rendered config/welcome/home are always picked up)"
+dc up -d --force-recreate element
 
 # ---------------------------------------------------------------------------
 # Step 9: summary

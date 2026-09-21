@@ -78,6 +78,7 @@ services:
     volumes:
       - ./element/config.json:/app/config.json:ro
       - ./element/welcome.html:/app/welcome.html:ro
+      - ./element/home.html:/app/home.html:ro
       - ./element/assets:/app/rumi:ro
     ports:
       - "${BIND_ADDR:-127.0.0.1}:${ELEMENT_PORT:-8082}:80"
