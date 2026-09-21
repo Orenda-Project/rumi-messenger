@@ -1,0 +1,33 @@
+# Rumi Messenger TLS front door -- only used with `docker compose --profile tls up -d`.
+# Fill in your real domain via the SERVER_NAME env var before starting this profile.
+#
+# Serves:
+#   https://{$SERVER_NAME}                      -> Element Web (the app)
+#   https://{$SERVER_NAME}/_matrix, /_synapse    -> Synapse (client-server + media + federation)
+#   https://{$SERVER_NAME}/.well-known/matrix/*  -> server discovery (so clients/federation find
+#                                                    Synapse without SERVER_NAME == the Synapse host)
+
+{$SERVER_NAME} {
+	handle /.well-known/matrix/server {
+		header Content-Type application/json
+		respond `{"m.server": "{$SERVER_NAME}:443"}` 200
+	}
+
+	handle /.well-known/matrix/client {
+		header Content-Type application/json
+		header Access-Control-Allow-Origin *
+		respond `{"m.homeserver": {"base_url": "https://{$SERVER_NAME}"}, "m.identity_server": {"base_url": "https://vector.im"}}` 200
+	}
+
+	handle /_matrix/* {
+		reverse_proxy synapse:8008
+	}
+
+	handle /_synapse/* {
+		reverse_proxy synapse:8008
+	}
+
+	handle {
+		reverse_proxy element:80
+	}
+}

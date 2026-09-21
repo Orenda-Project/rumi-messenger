@@ -1,0 +1,113 @@
+# Set COMPOSE_PROJECT_NAME in deploy/.env to run two independent checkouts (e.g. verification
+# runs) side by side without them sharing volumes/network -- see deploy/.env.example.
+name: ${COMPOSE_PROJECT_NAME:-rumi-messenger}
+
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "5"
+
+services:
+  postgres:
+    # Pinned to the exact version resolved from :16-alpine on 2026-09-21. To upgrade: bump the
+    # tag to a newer postgres:16.x-alpine (or 17.x for a major bump, which needs a pg_upgrade
+    # migration -- Synapse does not support that automatically), then `docker compose pull`.
+    image: postgres:16.15-alpine
+    container_name: ${RUMI_CONTAINER_PREFIX:-rumi}-postgres
+    restart: unless-stopped
+    logging: *default-logging
+    environment:
+      POSTGRES_USER: synapse
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: synapse
+      # Matrix/Synapse requires these exact collation settings on the DB.
+      POSTGRES_INITDB_ARGS: "--encoding=UTF8 --locale=C"
+      LC_ALL: C
+      LANG: C
+    volumes:
+      - rumi-postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U synapse -d synapse"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  synapse:
+    # Pinned to the specific release resolved from :latest on 2026-09-21 (matrixdotorg/synapse
+    # 1.161.0). To upgrade: check https://github.com/element-hq/synapse/releases for the new
+    # version + its upgrade notes (schema migrations can require a specific version path), bump
+    # this tag, then `docker compose pull && docker compose up -d synapse`.
+    image: matrixdotorg/synapse:v1.161.0
+    container_name: ${RUMI_CONTAINER_PREFIX:-rumi}-synapse
+    restart: unless-stopped
+    logging: *default-logging
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      SYNAPSE_SERVER_NAME: ${SERVER_NAME}
+      SYNAPSE_REPORT_STATS: "no"
+      UID: "991"
+      GID: "991"
+      # Makes /data/rumi_log_format.py (written by scripts/setup.sh) importable by the
+      # dictConfig-based log config, so Synapse's stdout is JSON lines (docker logs IS the log).
+      PYTHONPATH: /data
+    volumes:
+      - ./synapse/data:/data
+    ports:
+      - "${BIND_ADDR:-127.0.0.1}:${SYNAPSE_PORT:-8008}:8008"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8008/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+
+  element:
+    # Pinned to the specific release resolved from :latest on 2026-09-21 (Element Web v1.12.28).
+    # To upgrade: check https://github.com/element-hq/element-web/releases, bump this tag, then
+    # `docker compose pull && docker compose up -d element`.
+    image: vectorim/element-web:v1.12.28
+    container_name: ${RUMI_CONTAINER_PREFIX:-rumi}-element
+    restart: unless-stopped
+    logging: *default-logging
+    depends_on:
+      synapse:
+        condition: service_healthy
+    volumes:
+      - ./element/config.json:/app/config.json:ro
+      - ./element/welcome.html:/app/welcome.html:ro
+      - ./element/assets:/app/rumi:ro
+    ports:
+      - "${BIND_ADDR:-127.0.0.1}:${ELEMENT_PORT:-8082}:80"
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://localhost:80/"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+
+  # Optional TLS/reverse-proxy front door for a real domain. Not started by default --
+  # `docker compose --profile tls up -d` brings it up. See deploy/Caddyfile.
+  caddy:
+    image: caddy:2-alpine
+    container_name: ${RUMI_CONTAINER_PREFIX:-rumi}-caddy
+    restart: unless-stopped
+    logging: *default-logging
+    profiles: ["tls"]
+    depends_on:
+      - synapse
+      - element
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - rumi-caddy-data:/data
+      - rumi-caddy-config:/config
+
+volumes:
+  rumi-postgres-data:
+  rumi-caddy-data:
+  rumi-caddy-config:

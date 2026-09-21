@@ -1,0 +1,101 @@
+{
+  "default_server_config": {
+    "m.homeserver": {
+      "base_url": "__PUBLIC_BASE_URL__",
+      "server_name": "__SERVER_NAME__"
+    }
+  },
+  "brand": "Rumi",
+  "welcome_user_id": "@rumi:__SERVER_NAME__",
+  "default_theme": "custom-Rumi",
+  "default_country_code": "PK",
+  "disable_custom_urls": true,
+  "disable_guests": true,
+  "show_labs_settings": false,
+  "room_directory": {
+    "servers": ["__SERVER_NAME__"]
+  },
+  "mobile_builds": {
+    "ios": "https://apps.apple.com/app/element-x/id1631335820",
+    "android": "https://play.google.com/store/apps/details?id=io.element.android.x",
+    "fdroid": null
+  },
+  "embedded_pages": {
+    "welcome_url": "welcome.html",
+    "home_url": "welcome.html"
+  },
+  "branding": {
+    "auth_header_logo_url": "/rumi/rumi-mark-white-smile.png",
+    "welcome_background_url": "/rumi/rumi-bg-navy-constellation.png",
+    "auth_footer_links": [
+      { "text": "Privacy", "url": "__PUBLIC_BASE_URL__/privacy" },
+      { "text": "Help", "url": "__PUBLIC_BASE_URL__/help" }
+    ]
+  },
+  "setting_defaults": {
+    "custom_themes": [
+      {
+        "name": "Rumi",
+        "is_dark": false,
+        "fonts": {
+          "general": "Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif",
+          "monospace": "'Courier New', monospace"
+        },
+        "colors": {
+          "accent-color": "#F06E42",
+          "primary-color": "#0E2058",
+          "warning-color": "#F59F0A",
+          "sidebar-color": "#0E2058",
+          "roomlist-background-color": "#F9FAFB",
+          "roomlist-text-color": "#1D2025",
+          "roomlist-text-secondary-color": "#6B7280",
+          "roomlist-highlights-color": "#FFFFFF",
+          "roomlist-separator-color": "#E5E7EB",
+          "timeline-background-color": "#FFFFFF",
+          "timeline-text-color": "#1D2025",
+          "timeline-text-secondary-color": "#6B7280",
+          "timeline-highlights-color": "#F9FAFB",
+          "username-colors": [
+            "#0E2058", "#F06E42", "#21C45D", "#F59F0A",
+            "#3C83F6", "#DC2828", "#6B7280", "#0E2058"
+          ],
+          "avatar-background-colors": [
+            "#0E2058", "#F06E42", "#21C45D", "#F59F0A",
+            "#3C83F6", "#DC2828", "#8892A6", "#24368F"
+          ]
+        }
+      },
+      {
+        "name": "Rumi Dark",
+        "is_dark": true,
+        "fonts": {
+          "general": "Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif",
+          "monospace": "'Courier New', monospace"
+        },
+        "colors": {
+          "accent-color": "#F06E42",
+          "primary-color": "#4F74E3",
+          "warning-color": "#F59F0A",
+          "sidebar-color": "#0B1430",
+          "roomlist-background-color": "#12193A",
+          "roomlist-text-color": "#F9FAFB",
+          "roomlist-text-secondary-color": "#A8B0C4",
+          "roomlist-highlights-color": "#1B2450",
+          "roomlist-separator-color": "#2A3363",
+          "timeline-background-color": "#0E1330",
+          "timeline-text-color": "#F9FAFB",
+          "timeline-text-secondary-color": "#A8B0C4",
+          "timeline-highlights-color": "#182052",
+          "username-colors": [
+            "#7C9CF0", "#F06E42", "#3EDB80", "#F5B301",
+            "#6DA9FF", "#FF6B6B", "#A8B0C4", "#7C9CF0"
+          ],
+          "avatar-background-colors": [
+            "#7C9CF0", "#F06E42", "#3EDB80", "#F5B301",
+            "#6DA9FF", "#FF6B6B", "#8892A6", "#4F74E3"
+          ]
+        }
+      }
+    ]
+  }
+}

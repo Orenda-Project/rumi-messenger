@@ -1,5 +1,9 @@
 deploy/synapse/data/
 deploy/.env
+deploy/rumi-channel.env
+deploy/element/config.json
+deploy/element/welcome.html
 .env
 node_modules/
 *.log
+backups/
