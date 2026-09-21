@@ -1,0 +1,5 @@
+deploy/synapse/data/
+deploy/.env
+.env
+node_modules/
+*.log

@@ -1,0 +1,6 @@
+ts	phase	decision	why	evidence	result
+2026-09-21T07:27:53Z	plan	Matrix instead of Signal-Server	Signal-Server unhostable past registration (SGX contact discovery, undocumented storage-service/SVR2/zkgroup)	softwaremill.com/can-you-self-host-the-signal-server (Apr 2025); jtof-dev/Signal-Docker roadmap	accepted
+2026-09-21T07:27:53Z	plan	Synapse+Postgres over Tuwunel for v1	appservice/bot APIs and docs most mature; Tuwunel documented as the lighter swap in RUNBOOK	matrix.org deployments; Tuwunel single-node only	accepted
+2026-09-21T07:27:53Z	plan	Rumi integration = additive channel driver inside rumi-platform, not a separate bridge	rumi-platform already has slack/discord additive drivers with parity tests; a bridge would duplicate 500 call sites of routing	bot/shared/services/messaging/channel-registry.js, discord-*.js	accepted
+2026-09-21T07:27:53Z	plan	Rumi placement via Element welcome_user_id + auto_join_rooms	built-in Element feature: new users get a DM with that user; no client fork needed	element-web docs/config.md welcome_user_id	accepted
+2026-09-21T07:27:53Z	plan	Full Rumi brain reply not verifiable locally	no OPENROUTER/SUPABASE keys on this machine; rumi-platform .env absent	ls rumi-platform/.env -> only .env.template	channel verified with live Synapse + mocked dispatch; keys wizard for Kamal
