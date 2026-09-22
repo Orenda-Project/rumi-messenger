@@ -283,16 +283,42 @@ register_user() {
 register_user "${ADMIN_USER}" "${ADMIN_PASSWORD}" "-a"
 register_user "rumi" "${RUMI_BOT_PASSWORD}" "--no-admin"
 
+# Login with retry on 429: Synapse rate-limits password logins (rc_login), and a
+# rerun straight after heavy testing would otherwise abort the whole setup.
 login_user() {
-  local username="$1" password="$2"
-  curl -fsS -X POST "http://${BIND_ADDR}:${SYNAPSE_PORT}/_matrix/client/v3/login" \
-    -H "Content-Type: application/json" \
-    -d "{\"type\":\"m.login.password\",\"identifier\":{\"type\":\"m.id.user\",\"user\":\"${username}\"},\"password\":\"${password}\"}"
+  local username="$1" password="$2" attempt out code
+  for attempt in 1 2 3 4 5; do
+    out="$(curl -sS -w '\n%{http_code}' -X POST "http://${BIND_ADDR}:${SYNAPSE_PORT}/_matrix/client/v3/login" \
+      -H "Content-Type: application/json" \
+      -d "{\"type\":\"m.login.password\",\"identifier\":{\"type\":\"m.id.user\",\"user\":\"${username}\"},\"password\":\"${password}\"}")"
+    code="${out##*$'\n'}"; out="${out%$'\n'*}"
+    if [[ "${code}" == "200" ]]; then printf '%s' "${out}"; return 0; fi
+    if [[ "${code}" == "429" ]]; then
+      local wait_ms; wait_ms="$(python3 -c "import json,sys; print(json.loads(sys.argv[1]).get('retry_after_ms',5000))" "${out}" 2>/dev/null || echo 5000)"
+      log "  login rate-limited (429), retrying in $((wait_ms/1000+1))s (attempt ${attempt}/5)"
+      sleep "$((wait_ms/1000+1))"; continue
+    fi
+    log "  ERROR: login for ${username} failed with HTTP ${code}: ${out}"; return 1
+  done
+  log "  ERROR: login for ${username} still rate-limited after 5 attempts"; return 1
 }
 
-BOT_LOGIN_JSON="$(login_user rumi "${RUMI_BOT_PASSWORD}")"
-BOT_TOKEN="$(python3 -c "import json,sys; print(json.loads(sys.argv[1])['access_token'])" "${BOT_LOGIN_JSON}")"
 BOT_USER_ID="@rumi:${SERVER_NAME}"
+# Reuse the existing bot token if it still works, so reruns never touch the login endpoint.
+BOT_TOKEN=""
+if [[ -f "${CHANNEL_ENV_FILE}" ]]; then
+  BOT_TOKEN="$(grep -E '^MATRIX_ACCESS_TOKEN=' "${CHANNEL_ENV_FILE}" | cut -d= -f2- || true)"
+  if [[ -n "${BOT_TOKEN}" ]] && curl -fsS -H "Authorization: Bearer ${BOT_TOKEN}" \
+       "http://${BIND_ADDR}:${SYNAPSE_PORT}/_matrix/client/v3/account/whoami" >/dev/null 2>&1; then
+    log "  existing @rumi token still valid, skipping login"
+  else
+    BOT_TOKEN=""
+  fi
+fi
+if [[ -z "${BOT_TOKEN}" ]]; then
+  BOT_LOGIN_JSON="$(login_user rumi "${RUMI_BOT_PASSWORD}")"
+  BOT_TOKEN="$(python3 -c "import json,sys; print(json.loads(sys.argv[1])['access_token'])" "${BOT_LOGIN_JSON}")"
+fi
 
 cat > "${CHANNEL_ENV_FILE}" <<EOF
 # Written by scripts/setup.sh. rumi-platform reads this to log the @rumi bot into Matrix.
@@ -445,7 +471,7 @@ fi
 # Force-recreating guarantees the container's bind mounts are re-resolved against the freshly
 # rendered files every run, not just on first create.
 log "  starting element (force-recreate so rendered config/welcome/home are always picked up)"
-dc up -d --force-recreate element
+dc up -d --force-recreate --wait element
 
 # ---------------------------------------------------------------------------
 # Step 9: summary
