@@ -8,6 +8,33 @@ alongside whatever your primary channel is (WhatsApp via `baileys` or `meta`), n
 Setting `MATRIX_HOMESERVER_URL` + `MATRIX_ACCESS_TOKEN` is what turns it on -- there's no
 `CHANNEL_DRIVER=matrix` switch to flip.
 
+## Teachers register with their phone number
+
+A teacher's username on this server must be their phone number in digits, for example
+`923001234567`, with no plus sign, spaces or dashes. The sign-up page says so, and it is not only a
+convention that makes the product feel like WhatsApp.
+
+Rumi records who asked for a lesson plan, a quiz or a video in columns that were sized for a phone
+number, twenty characters. An additive channel sends a prefixed identity rather than a bare number,
+and anything longer than twenty characters is rejected by the database. A teacher sees a polite
+"something went wrong" while the real cause is hidden in the log. We hit exactly this, and it is
+tracked upstream as [rumi-platform#107](https://github.com/Orenda-Project/rumi-platform/issues/107),
+which also shows that Discord has the same fault today.
+
+Using the phone number keeps our identity inside that limit without changing the shared schema, so
+this deployment works against rumi-platform as it stands.
+
+What this means in practice:
+
+- Tell staff to register with their number. The sign-up page repeats it.
+- Set display names to real names, so colleagues see "Ayesha Khan" and not a number.
+- Admin or service accounts may keep ordinary usernames. They still work, and the bot logs a warning
+  the first time one is used, because the long flows above can fail for them.
+- Two teachers cannot share a number, which is the behaviour you want anyway.
+
+Once rumi-platform#107 is fixed, this becomes a preference rather than a requirement, and the
+constraint here can be relaxed.
+
 ## Which rumi-platform branch carries this
 
 The Matrix channel driver lives on rumi-platform's `feat/matrix-channel` branch (three files:
