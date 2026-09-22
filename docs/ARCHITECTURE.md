@@ -144,6 +144,76 @@ Element's Compound design-system tokens (`--cpd-color-*`) that theme the newer
 Compound-based UI surfaces (buttons, action colors) that the older `colors` keys alone don't
 reach.
 
+## Why we do not fork Element or Synapse
+
+This is the question everyone asks first, so it is worth answering plainly.
+
+We use two large pieces of other people's software: **Synapse**, the server that stores and delivers
+messages, and **Element Web**, the chat app a teacher actually looks at. Both are open source, and we
+could legally fork either one. We did not, and that was deliberate.
+
+### The two ways to use an open source project
+
+**Forking** means copying their source into our repository, editing it, and building it ourselves from
+then on. You own a snapshot, and it starts drifting from theirs the day you take it.
+
+**Configuring** means running their released build and handing it your settings. That is what we do.
+In `deploy/docker-compose.yml`, the `image:` line is their finished software, pinned to an exact
+version and downloaded ready-made. The `volumes:` lines under it are our four files being handed in:
+
+```
+./element/config.json    -> /app/config.json     our colours, theme, server address, branding
+./element/welcome.html   -> /app/welcome.html    our signed-out page
+./element/home.html      -> /app/home.html       our signed-in page, with Talk to Rumi
+./element/assets         -> /app/rumi            our logo
+```
+
+Element is built to accept exactly this. We changed how it looks and where it points without touching
+a line of their code. Nothing in this repository is copied from Element or Synapse; `git ls-files`
+shows 26 files and about 2,900 lines, all written for this project.
+
+### How Rumi gets in, without a fork either
+
+Matrix is a protocol, the way email is a protocol. Any program that speaks it can join. So Rumi signs
+in as an ordinary user account, `@rumi:<server>`, and talks over that protocol like any other client.
+That code lives in rumi-platform as one more channel beside the Slack and Discord ones that were
+already there, not inside anyone else's project. From the server's point of view, Rumi is simply
+another member of the conversation. That is the whole reason no fork was needed to make our own
+companion work here.
+
+### What this buys, and what it costs
+
+Synapse and Element ship security updates constantly. Unforked, taking one is changing a version
+number, with the safety checklist in the Element upgrade issue. Forked, every update becomes a merge
+you resolve by hand, forever, in software neither of us wrote. That maintenance burden is what
+usually kills forks, and it buys nothing while the customisation you need is customisation the
+project already supports.
+
+The cost is real too: we can only change what Element's configuration reaches. When we needed
+something outside it, we found out the hard way, and those limits are recorded in `DECISIONS.tsv`.
+
+### When a fork does become the right answer
+
+When the app on a teacher's phone should be called Rumi, carry our icon, and already know our server
+address. Configuration cannot do that. It needs a fork of one of the phone clients, published under
+their licence because both are AGPL, plus app store accounts and an update treadmill. That work is
+tracked as its own issue, and it should follow a decision about whether this product is a Rumi
+channel or a full WhatsApp replacement, rather than being started by accident.
+
+### Licences
+
+| Software | How we use it | Licence |
+|---|---|---|
+| Synapse | Official image, unmodified | AGPL-3.0 |
+| Element Web | Official image, unmodified, configured | AGPL-3.0 |
+| PostgreSQL | Official image, unmodified | PostgreSQL licence |
+| matrix-bot-sdk | npm dependency in rumi-platform | MIT |
+| matrix-sdk-crypto-nodejs | npm dependency in rumi-platform | Apache-2.0 |
+| This repository | Our own work | Apache-2.0 |
+
+Because we run Synapse and Element unmodified, their AGPL terms do not reach our code. That changes
+the day anyone forks one of them, which is the other reason to make that call deliberately.
+
 ## Scaling notes
 
 The default stack is **Synapse + Postgres on a single box** -- fine for a school, a small
