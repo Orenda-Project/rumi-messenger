@@ -118,6 +118,41 @@ which process and which API call): [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 | TLS / a real public domain | Yes -- the `tls` Compose profile fronts everything with Caddy. See [docs/RUNBOOK.md](docs/RUNBOOK.md#moving-to-a-real-domain-tls) |
 | Federation with other Matrix servers | Out of scope for v1 (documented in [docs/PLAN.md](docs/PLAN.md)) -- this is a closed messenger for your own team, not a federated network |
 
+## Built on
+
+Rumi Messenger is a thin layer over other people's hard work. Everything below is used unmodified,
+as a pinned official build or a package dependency, and is credited here because the project only
+exists because these are open.
+
+| Project | What it does for us | Licence |
+|---|---|---|
+| [Matrix specification](https://github.com/matrix-org/matrix-spec) | The open protocol the whole thing speaks, which is why Rumi can join as an ordinary account | Apache-2.0 |
+| [Synapse](https://github.com/element-hq/synapse) | The homeserver. Stores and delivers messages, never in plaintext | AGPL-3.0 |
+| [Element Web](https://github.com/element-hq/element-web) | The app teachers use. We supply the colours, pages and logo through its own configuration | AGPL-3.0 |
+| [matrix-bot-sdk](https://github.com/turt2live/matrix-bot-sdk) | How the Rumi channel in rumi-platform talks to the homeserver | MIT |
+| [matrix-rust-sdk](https://github.com/matrix-org/matrix-rust-sdk) | The encryption that makes Rumi's own messages end-to-end encrypted | Apache-2.0 |
+| [PostgreSQL](https://www.postgresql.org/) | Synapse's database | PostgreSQL licence |
+| [Caddy](https://github.com/caddyserver/caddy) | Certificates and the front door, in the `tls` profile | Apache-2.0 |
+
+On phones, teachers use [Element X](https://github.com/element-hq/element-x-android) or
+[FluffyChat](https://github.com/krille-chan/fluffychat), both AGPL-3.0, pointed at their own server.
+Calling, when we get there, will use [coturn](https://github.com/coturn/coturn) and
+[LiveKit](https://github.com/livekit/livekit).
+
+### Contributing back
+
+We would rather send a fix upstream than carry a workaround here. Two things we learned building
+this are worth writing up for the projects themselves, and are open for anyone who wants them:
+
+- Element still lists `welcome_user_id` in its configuration documentation as deprecated, but the
+  feature was removed. It silently does nothing, which cost us real time. Their docs deserve a
+  correction.
+- The Compound colour tokens that themes depend on are barely documented. We found all fifty-one by
+  inspecting a running build. A documented list would help every self-hoster who brands Element.
+
+If you hit something in this repository that turns out to be an upstream bug, please say so in the
+issue, and if you can, report it there too and link it back here.
+
 ## Do we fork Element and Synapse?
 
 No. We run their official builds, pinned to exact versions, and hand them our own configuration,
