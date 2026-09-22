@@ -118,6 +118,25 @@ which process and which API call): [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 | TLS / a real public domain | Yes -- the `tls` Compose profile fronts everything with Caddy. See [docs/RUNBOOK.md](docs/RUNBOOK.md#moving-to-a-real-domain-tls) |
 | Federation with other Matrix servers | Out of scope for v1 (documented in [docs/PLAN.md](docs/PLAN.md)) -- this is a closed messenger for your own team, not a federated network |
 
+## What is next
+
+Everything still open is tracked as an issue. The short version:
+
+| | Issue |
+|---|---|
+| Push notifications on phones | [#3](https://github.com/Orenda-Project/rumi-messenger/issues/3) |
+| Test on real phones, teacher setup guide | [#4](https://github.com/Orenda-Project/rumi-messenger/issues/4) |
+| Production hardening: domain, certificates, backups | [#6](https://github.com/Orenda-Project/rumi-messenger/issues/6) |
+| One-to-one audio and video calls | [#1](https://github.com/Orenda-Project/rumi-messenger/issues/1) |
+| Group calls and screen sharing | [#2](https://github.com/Orenda-Project/rumi-messenger/issues/2) |
+| Let teachers find each other | [#10](https://github.com/Orenda-Project/rumi-messenger/issues/10) |
+| Sign up with a phone number | [#5](https://github.com/Orenda-Project/rumi-messenger/issues/5) |
+| Re-check the theme before bumping Element | [#7](https://github.com/Orenda-Project/rumi-messenger/issues/7) |
+| Decide federation and retention | [#8](https://github.com/Orenda-Project/rumi-messenger/issues/8) |
+| Rumi-branded phone app | [#9](https://github.com/Orenda-Project/rumi-messenger/issues/9) |
+
+On the Rumi side: the channel itself is [rumi-platform#104](https://github.com/Orenda-Project/rumi-platform/pull/104), tracked by [#106](https://github.com/Orenda-Project/rumi-platform/issues/106), and the hardcoded chat model is [#105](https://github.com/Orenda-Project/rumi-platform/issues/105).
+
 ## Repo map
 
 ```
