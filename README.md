@@ -118,6 +118,13 @@ which process and which API call): [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 | TLS / a real public domain | Yes -- the `tls` Compose profile fronts everything with Caddy. See [docs/RUNBOOK.md](docs/RUNBOOK.md#moving-to-a-real-domain-tls) |
 | Federation with other Matrix servers | Out of scope for v1 (documented in [docs/PLAN.md](docs/PLAN.md)) -- this is a closed messenger for your own team, not a federated network |
 
+## Do we fork Element and Synapse?
+
+No. We run their official builds, pinned to exact versions, and hand them our own configuration,
+pages and logo. Rumi joins over the Matrix protocol as an ordinary account, so nothing in this
+repository is copied from anyone else's project. The reasoning, the licences, and the one case where
+a fork would be the right answer are in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
+
 ## What is next
 
 Everything still open is tracked as an issue. The short version:
