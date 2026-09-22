@@ -175,6 +175,24 @@ config["url_preview_enabled"] = False
 config["presence"] = {"enabled": True}
 config["report_stats"] = False
 
+# Synapse's default rate limits assume a public server defending itself. A school is
+# the opposite shape: a staffroom signs in together at 8am and a class joins a room
+# together, which at the defaults reads as abuse and answers M_LIMIT_EXCEEDED.
+config["rc_login"] = {
+    "address": {"per_second": 1, "burst_count": 30},
+    "account": {"per_second": 1, "burst_count": 30},
+    "failed_attempts": {"per_second": 0.5, "burst_count": 10},
+}
+config["rc_joins"] = {
+    "local": {"per_second": 1, "burst_count": 50},
+    "remote": {"per_second": 0.05, "burst_count": 10},
+}
+config["rc_message"] = {"per_second": 5, "burst_count": 30}
+config["rc_invites"] = {
+    "per_room": {"per_second": 1, "burst_count": 20},
+    "per_user": {"per_second": 1, "burst_count": 20},
+}
+
 with open(path, "w") as f:
     yaml.safe_dump(config, f, default_flow_style=False, sort_keys=False)
 
