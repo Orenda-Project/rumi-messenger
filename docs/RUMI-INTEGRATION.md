@@ -13,7 +13,7 @@ Setting `MATRIX_HOMESERVER_URL` + `MATRIX_ACCESS_TOKEN` is what turns it on -- t
 The Matrix channel driver lives on rumi-platform's `feat/matrix-channel` branch (three files:
 `bot/shared/services/messaging/matrix-connection.js`, `matrix-channel.service.js`, and
 `inbound/matrix-events.adapter.js`, plus the `MATRIX_*` block in `.env.template`). PR:
-`TODO-PR-URL`. If that PR has merged to `main` by the time you read this, just use `main`
+`https://github.com/Orenda-Project/rumi-platform/pull/104`. If that PR has merged to `main` by the time you read this, just use `main`
 instead -- the steps below are the same either way.
 
 ## Steps
