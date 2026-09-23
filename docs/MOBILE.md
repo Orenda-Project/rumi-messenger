@@ -8,7 +8,9 @@ account, including a real 1:1 chat with `@rumi`.
 
 **Type the scheme.** Until the server has a real domain and certificate (#6), it is reached over plain
 http. The Android app assumes https when you type a bare `host:port`, and the connection fails
-silently with a spinner. Typing `http://10.0.2.2:8108` in full worked first time. Whoever fills in the
+silently with a spinner. Typing `http://10.0.2.2:8108` in full worked, but only after about ninety seconds: the app still tries
+https discovery first, three times with a thirty-second timeout each, before a fallback reads the address
+literally. A teacher sees a spinner for a minute and a half and may give up. A real https address avoids all of it. Whoever fills in the
 default homeserver for a local or pilot deployment must include `http://`; a production `https://`
 address needs no such care.
 
@@ -16,7 +18,8 @@ address needs no such care.
 signed in on a phone with no recovery key and no other device open, hits a red warning about losing
 message history. That is Matrix's device verification working as designed, and it is the single
 scariest moment a teacher can meet. The fix is procedural, not code: sign in on the new device while
-the old one is open and approve it there, or set a recovery key at first sign-in. Tracked as
+the old one is open and approve it there, or set a recovery key at first sign-in. If a message then fails with a red mark, a long-press on it shows the reason and a **Send message anyway**
+button, which works. Tracked as
 [#14](https://github.com/Orenda-Project/rumi-messenger/issues/14).
 
 ## Element X (Android / iOS)
