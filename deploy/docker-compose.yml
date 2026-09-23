@@ -132,6 +132,54 @@ services:
       retries: 10
       start_period: 10s
 
+  # Push gateway (Matrix's Sygnal) for phone push notifications (issue #3). Behind the "push"
+  # profile so a deployment with no Firebase/Apple keys pays nothing -- `docker compose --profile
+  # push up -d sygnal` opts in explicitly, same shape as the "tls" profile below. Config is
+  # rendered by scripts/push-setup.sh from deploy/.env into deploy/sygnal/sygnal.yaml
+  # (gitignored, same template-rendered-at-setup-time pattern as Element's
+  # config.json/welcome.html/home.html and coturn's turnserver.conf). See docs/PUSH.md.
+  #
+  # Bound like every other service here (BIND_ADDR, 127.0.0.1 by default) so it's reachable for
+  # local testing (scripts/push-check.sh) -- but the client that actually needs to reach Sygnal
+  # in a real deployment is the HOMESERVER, not the phone: Synapse calls
+  # `POST /_matrix/push/v1/notify` on Sygnal when it decides to push an event, and the phone only
+  # ever talks to Synapse (for Matrix) and Firebase/APNs (for the actual push) directly, never to
+  # Sygnal. That matters for the production network layout in issue #6 -- on this single-box
+  # stack Sygnal is reachable from Synapse automatically (same docker network, `sygnal` DNS
+  # name), but on a split/multi-host deployment Sygnal's address has to be added to whatever
+  # Synapse can reach, not just exposed the way Synapse/Element are for browsers.
+  sygnal:
+    # Pinned to the exact release resolved from element-hq/sygnal's GitHub releases on
+    # 2026-09-23 (v0.17.0 -- matches the matrixdotorg/sygnal Docker Hub tag of the same name; the
+    # project's canonical repo moved from matrix-org/sygnal to element-hq/sygnal upstream, same
+    # org move as Synapse/Element Web above). To upgrade: check
+    # https://github.com/element-hq/sygnal/releases, bump this tag, then
+    # `docker compose pull && docker compose --profile push up -d sygnal`.
+    image: matrixdotorg/sygnal:v0.17.0
+    container_name: ${RUMI_CONTAINER_PREFIX:-rumi}-sygnal
+    restart: unless-stopped
+    logging: *default-logging
+    profiles: ["push"]
+    volumes:
+      # scripts/push-setup.sh renders sygnal.yaml (and, once a real one exists, the FCM service
+      # account JSON lives alongside it) into this directory -- mounted read-only, same posture
+      # as Element's/coturn's rendered config mounts above.
+      - ./sygnal:/data:ro
+    environment:
+      SYGNAL_CONF: /data/sygnal.yaml
+    ports:
+      - "${BIND_ADDR:-127.0.0.1}:${SYGNAL_PORT:-5000}:5000"
+    healthcheck:
+      # python3, not curl: the sygnal image's own Dockerfile HEALTHCHECK uses curl, but curl is
+      # not installed in its python:3.12-slim-bookworm runtime stage (no apt-get install curl
+      # step in docker/Dockerfile on element-hq/sygnal main as of 2026-09-23) -- python3 is
+      # guaranteed present since it's the image's own entrypoint interpreter.
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:5000/health', timeout=3)"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+
   # Optional TLS/reverse-proxy front door for a real domain. Not started by default --
   # `docker compose --profile tls up -d` brings it up. See deploy/Caddyfile.
   caddy:
