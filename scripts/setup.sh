@@ -473,7 +473,7 @@ curl -fsS -X PUT "http://${BIND_ADDR}:${SYNAPSE_PORT}/_matrix/client/v3/profile/
   -H "Authorization: Bearer ${BOT_TOKEN}" -H "Content-Type: application/json" \
   -d '{"displayname":"Rumi"}' >/dev/null
 
-AVATAR_FILE="${ELEMENT_DIR}/assets/rumi-mark-white-square.png"
+AVATAR_FILE="${ELEMENT_DIR}/assets/rumi-avatar-navy.png"
 CURRENT_AVATAR="$(curl -fsS "http://${BIND_ADDR}:${SYNAPSE_PORT}/_matrix/client/v3/profile/${BOT_USER_ID}/avatar_url" 2>/dev/null \
   | python3 -c "import json,sys; print(json.load(sys.stdin).get('avatar_url') or '')" 2>/dev/null || true)"
 if [[ -n "${CURRENT_AVATAR}" ]]; then
