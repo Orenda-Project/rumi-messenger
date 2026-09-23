@@ -286,7 +286,15 @@ config["turn_allow_guests"] = True
 config["federation_domain_whitelist"] = []
 for listener in config.get("listeners", []):
     for res in listener.get("resources", []):
-        res["names"] = [n for n in res.get("names", []) if n != "federation"]
+        names = [n for n in res.get("names", []) if n != "federation"]
+        # `openid` is Synapse's stand-alone resource for ONE endpoint,
+        # /_matrix/federation/v1/openid/userinfo, which is how third-party services (here:
+        # lk-jwt-service for group calls, issue #2) check that a teacher's OpenID token is real.
+        # It is normally bundled inside `federation`; listing it on its own keeps that single
+        # endpoint while the rest of the federation API stays unserved (404).
+        if "client" in names and "openid" not in names:
+            names.append("openid")
+        res["names"] = names
 
 with open(path, "w") as f:
     yaml.safe_dump(config, f, default_flow_style=False, sort_keys=False)

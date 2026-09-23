@@ -167,6 +167,14 @@ FED_CLOSED=0
 [[ "${FED_CODE}" == "404" ]] && FED_CLOSED=1
 check "Federation API not served (federation OFF, #8)" "${FED_CLOSED}" "GET /_matrix/federation/v1/version returned HTTP ${FED_CODE}, expected 404"
 
+# ...but the stand-alone `openid` resource IS served (issue #2): lk-jwt-service verifies teachers'
+# OpenID tokens at /_matrix/federation/v1/openid/userinfo. With a bogus token Synapse answers 401
+# (endpoint present, token rejected); 404 would mean the resource is missing again.
+OID_CODE="$(curl -s -o /dev/null -w '%{http_code}' "${SYNAPSE_URL}/_matrix/federation/v1/openid/userinfo?access_token=bogus" 2>/dev/null || echo 000)"
+OID_OK=0
+[[ "${OID_CODE}" == "401" ]] && OID_OK=1
+check "OpenID userinfo endpoint served for call auth (#2)" "${OID_OK}" "GET /_matrix/federation/v1/openid/userinfo returned HTTP ${OID_CODE}, expected 401"
+
 # ---------------------------------------------------------------------------
 # 2. Element served + config.json brand/welcome_user_id + welcome.html rendered
 # ---------------------------------------------------------------------------
