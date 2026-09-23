@@ -4,6 +4,21 @@ Rumi Messenger doesn't ship its own mobile app. Instead, any standard Matrix cli
 your homeserver -- point it at your `PUBLIC_BASE_URL` and it behaves like any other Matrix
 account, including a real 1:1 chat with `@rumi`.
 
+## Two things learned on the emulator, 23 September 2026
+
+**Type the scheme.** Until the server has a real domain and certificate (#6), it is reached over plain
+http. The Android app assumes https when you type a bare `host:port`, and the connection fails
+silently with a spinner. Typing `http://10.0.2.2:8108` in full worked first time. Whoever fills in the
+default homeserver for a local or pilot deployment must include `http://`; a production `https://`
+address needs no such care.
+
+**A second device asks to "reset your digital identity".** An account already used on the web app,
+signed in on a phone with no recovery key and no other device open, hits a red warning about losing
+message history. That is Matrix's device verification working as designed, and it is the single
+scariest moment a teacher can meet. The fix is procedural, not code: sign in on the new device while
+the old one is open and approve it there, or set a recovery key at first sign-in. Tracked as
+[#14](https://github.com/Orenda-Project/rumi-messenger/issues/14).
+
 ## Element X (Android / iOS)
 
 [Element X](https://element.io/app) is the modern rewrite of Element's mobile client, built on
