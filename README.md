@@ -68,7 +68,7 @@ Tested means we ran it and have the output or the screenshots, not that we expec
 | Adding a second device | **Works** with a recovery key. The warning screen is scary ([#14](https://github.com/Orenda-Project/rumi-messenger/issues/14)); stale devices can block sending, and `scripts/devices.sh` fixes that |
 | Rumi's replies verified (no red shield) | **Tested** (`scripts/bot-cross-sign.sh`, [#15](https://github.com/Orenda-Project/rumi-messenger/issues/15)) |
 | 1:1 voice and video calls | **Relay tested on one machine.** Calls across two real networks need a live domain ([#1](https://github.com/Orenda-Project/rumi-messenger/issues/1), [#6](https://github.com/Orenda-Project/rumi-messenger/issues/6)) |
-| Group calls and screen sharing | **In progress** ([#2](https://github.com/Orenda-Project/rumi-messenger/issues/2), [CALLING.md](docs/CALLING.md)) |
+| Group calls and screen sharing | **Tested** on one machine: two- and three-person video calls and screen share in Element Call ([#2](https://github.com/Orenda-Project/rumi-messenger/issues/2), [CALLING.md](docs/CALLING.md)). Calls between different networks still need a real domain ([#6](https://github.com/Orenda-Project/rumi-messenger/issues/6)) |
 | Phone notifications while the app is closed | **No.** Gateway built, no Firebase key yet ([#3](https://github.com/Orenda-Project/rumi-messenger/issues/3), [PUSH.md](docs/PUSH.md)) |
 | Real domain with HTTPS | **Tested with a self-signed certificate.** Not yet on a real public domain ([#6](https://github.com/Orenda-Project/rumi-messenger/issues/6)) |
 | Backups | **Tested.** Every backup restore-verifies itself (`scripts/backup.sh`) |
@@ -113,8 +113,10 @@ exists because these are open.
 
 On phones, teachers use [Element X](https://github.com/element-hq/element-x-android) or
 [FluffyChat](https://github.com/krille-chan/fluffychat), both AGPL-3.0, pointed at their own server.
-Group calls and screen sharing, when we get there, will use
-[LiveKit](https://github.com/livekit/livekit) (tracked separately, [#2](https://github.com/Orenda-Project/rumi-messenger/issues/2)).
+Group calls and screen sharing use [LiveKit](https://github.com/livekit/livekit) (Apache-2.0) with
+Element's [lk-jwt-service](https://github.com/element-hq/lk-jwt-service) and
+[Element Call](https://github.com/element-hq/element-call), under the optional `calls` compose
+profile ([CALLING.md](docs/CALLING.md)).
 
 ### Contributing back
 
