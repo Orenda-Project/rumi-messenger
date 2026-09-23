@@ -123,6 +123,10 @@ rather than quietly serve plaintext.
 
 ### 4. Prove the roundtrip
 
+`matrix-smoke.js` ships on the `feat/matrix-channel` branch
+([PR #104](https://github.com/Orenda-Project/rumi-platform/pull/104)), not yet on rumi-platform
+`main` -- run this from that branch/worktree until the PR merges, or the script won't exist.
+
 ```bash
 MATRIX_HOMESERVER_URL=http://localhost:8008 \
 MATRIX_ACCESS_TOKEN=<the token from deploy/rumi-channel.env> \
