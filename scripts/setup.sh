@@ -673,19 +673,36 @@ curl -fsS -X PUT "http://${BIND_ADDR}:${SYNAPSE_PORT}/_matrix/client/v3/profile/
   -d '{"displayname":"Rumi"}' >/dev/null
 
 AVATAR_FILE="${ELEMENT_DIR}/assets/rumi-avatar-navy.png"
-CURRENT_AVATAR="$(curl -fsS "http://${BIND_ADDR}:${SYNAPSE_PORT}/_matrix/client/v3/profile/${BOT_USER_ID}/avatar_url" 2>/dev/null \
-  | python3 -c "import json,sys; print(json.load(sys.stdin).get('avatar_url') or '')" 2>/dev/null || true)"
-if [[ -n "${CURRENT_AVATAR}" ]]; then
-  log "  avatar already set (${CURRENT_AVATAR}), skipping upload"
-elif [[ -f "${AVATAR_FILE}" ]]; then
-  UPLOAD_JSON="$(curl -fsS -X POST "http://${BIND_ADDR}:${SYNAPSE_PORT}/_matrix/media/v3/upload?filename=rumi-avatar.png" \
-    -H "Authorization: Bearer ${BOT_TOKEN}" -H "Content-Type: image/png" \
-    --data-binary @"${AVATAR_FILE}")"
-  MXC_URI="$(python3 -c "import json,sys; print(json.loads(sys.argv[1])['content_uri'])" "${UPLOAD_JSON}")"
-  curl -fsS -X PUT "http://${BIND_ADDR}:${SYNAPSE_PORT}/_matrix/client/v3/profile/${BOT_USER_ID}/avatar_url" \
-    -H "Authorization: Bearer ${BOT_TOKEN}" -H "Content-Type: application/json" \
-    -d "{\"avatar_url\":\"${MXC_URI}\"}" >/dev/null
-  log "  avatar set (${MXC_URI})"
+AVATAR_HASH_FILE="${DEPLOY_DIR}/.rumi-avatar-navy.sha256"
+# Regenerate the avatar every run (cheap, deterministic PIL vector render -- see
+# scripts/make_rumi_avatar.py) so a fresh install always gets the current design
+# (white mark + thin cream ring on a navy disc -- the ring is what keeps the disc
+# edge visible in Element's dark/night theme; see docs/DECISIONS.tsv 2026-09-24)
+# without needing the design to be hand-copied into the repo separately.
+if command -v python3 >/dev/null 2>&1 && python3 -c "import PIL" >/dev/null 2>&1; then
+  python3 "${SCRIPT_DIR}/make_rumi_avatar.py" --out "${AVATAR_FILE}" >/dev/null
+else
+  log "  WARNING: python3/Pillow unavailable, cannot regenerate ${AVATAR_FILE} -- using whatever is already committed"
+fi
+
+if [[ -f "${AVATAR_FILE}" ]]; then
+  NEW_HASH="$(sha256sum "${AVATAR_FILE}" | cut -d' ' -f1)"
+  OLD_HASH="$(cat "${AVATAR_HASH_FILE}" 2>/dev/null || true)"
+  CURRENT_AVATAR="$(curl -fsS "http://${BIND_ADDR}:${SYNAPSE_PORT}/_matrix/client/v3/profile/${BOT_USER_ID}/avatar_url" 2>/dev/null \
+    | python3 -c "import json,sys; print(json.load(sys.stdin).get('avatar_url') or '')" 2>/dev/null || true)"
+  if [[ -n "${CURRENT_AVATAR}" && "${NEW_HASH}" == "${OLD_HASH}" ]]; then
+    log "  avatar already set and unchanged (${CURRENT_AVATAR}), skipping upload"
+  else
+    UPLOAD_JSON="$(curl -fsS -X POST "http://${BIND_ADDR}:${SYNAPSE_PORT}/_matrix/media/v3/upload?filename=rumi-avatar.png" \
+      -H "Authorization: Bearer ${BOT_TOKEN}" -H "Content-Type: image/png" \
+      --data-binary @"${AVATAR_FILE}")"
+    MXC_URI="$(python3 -c "import json,sys; print(json.loads(sys.argv[1])['content_uri'])" "${UPLOAD_JSON}")"
+    curl -fsS -X PUT "http://${BIND_ADDR}:${SYNAPSE_PORT}/_matrix/client/v3/profile/${BOT_USER_ID}/avatar_url" \
+      -H "Authorization: Bearer ${BOT_TOKEN}" -H "Content-Type: application/json" \
+      -d "{\"avatar_url\":\"${MXC_URI}\"}" >/dev/null
+    echo "${NEW_HASH}" > "${AVATAR_HASH_FILE}"
+    log "  avatar set (${MXC_URI})"
+  fi
 else
   log "  WARNING: ${AVATAR_FILE} not found, skipping avatar upload"
 fi
