@@ -1,8 +1,13 @@
 # Federation and Message Retention Decision Brief
 
-## Current State
+> **Status 2026-09-23: IMPLEMENTED as recommended.** Federation OFF (`federation_domain_whitelist: []`
+> plus the `federation` listener resource removed, in `scripts/setup.sh`; `scripts/e2e.sh` asserts
+> `/_matrix/federation/v1/version` returns 404). Retention left indefinite. Both reversible, see
+> [RUNBOOK.md](RUNBOOK.md#federation-and-message-retention-issue-8).
 
-**Federation:** Currently ENABLED by default in Synapse (no explicit disable in `homeserver.yaml`). The setup script sets `prefer_local_users=true` in `user_directory` config, which accommodates federation awareness but doesn't use it. PLAN.md lists federation as "out of scope for v1".
+## Current State (as of the brief, before implementation)
+
+**Federation:** Was ENABLED by default in Synapse (no explicit disable in `homeserver.yaml`). The setup script sets `prefer_local_users=true` in `user_directory` config, which accommodates federation awareness but doesn't use it. PLAN.md lists federation as "out of scope for v1".
 
 **Message Retention:** Not configured. Synapse's default behavior is indefinite retention (no auto-deletion of messages).
 

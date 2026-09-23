@@ -378,7 +378,7 @@ matching this repo's state before either pass ran). The rest of the live stack
 
 ```bash
 cd deploy && docker compose config --quiet   # exit 0, confirmed
-cd .. && scripts/e2e.sh                       # confirmed still 14 passed, 0 failed, with sygnal absent
+cd .. && scripts/e2e.sh                       # confirmed still all passed (15 at time of writing), 0 failed, with sygnal absent
 ```
 
 ## What could not be verified

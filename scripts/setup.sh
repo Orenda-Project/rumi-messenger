@@ -248,6 +248,16 @@ config["turn_shared_secret"] = os.environ["TURN_SHARED_SECRET"]
 config["turn_user_lifetime"] = 86400000
 config["turn_allow_guests"] = True
 
+# Federation OFF (issue #8, docs/FEDERATION-RETENTION.md): one school, one server, no inter-school
+# need yet. An empty whitelist makes Synapse refuse every remote server, and dropping the
+# `federation` resource from the listener stops serving /_matrix/federation/* at all -- the
+# generated default listener serves it on the same port as the client API. Re-enable both when a
+# second school needs to talk to this one.
+config["federation_domain_whitelist"] = []
+for listener in config.get("listeners", []):
+    for res in listener.get("resources", []):
+        res["names"] = [n for n in res.get("names", []) if n != "federation"]
+
 with open(path, "w") as f:
     yaml.safe_dump(config, f, default_flow_style=False, sort_keys=False)
 

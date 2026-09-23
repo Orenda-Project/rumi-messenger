@@ -159,6 +159,14 @@ VERSIONS_OK=0
 [[ -n "$(json_field "${VERSIONS_JSON}" versions)" ]] && VERSIONS_OK=1
 check "Synapse /_matrix/client/versions responds" "${VERSIONS_OK}" "no/invalid response from ${SYNAPSE_URL}"
 
+# Federation is OFF (issue #8): the federation API must not be served at all. Synapse answers
+# 404 when the `federation` resource is absent from the listener; 200 here means the listener
+# still serves it (setup.sh not re-run, or someone re-added it).
+FED_CODE="$(curl -s -o /dev/null -w '%{http_code}' "${SYNAPSE_URL}/_matrix/federation/v1/version" 2>/dev/null || echo 000)"
+FED_CLOSED=0
+[[ "${FED_CODE}" == "404" ]] && FED_CLOSED=1
+check "Federation API not served (federation OFF, #8)" "${FED_CLOSED}" "GET /_matrix/federation/v1/version returned HTTP ${FED_CODE}, expected 404"
+
 # ---------------------------------------------------------------------------
 # 2. Element served + config.json brand/welcome_user_id + welcome.html rendered
 # ---------------------------------------------------------------------------

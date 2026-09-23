@@ -386,6 +386,19 @@ cd deploy && docker compose restart synapse
 Full key reference: [Synapse's rate-limiting
 docs](https://element-hq.github.io/synapse/latest/usage/configuration/config_documentation.html#ratelimiting).
 
+## Federation and message retention (issue #8)
+
+Decided 2026-09-23, see [FEDERATION-RETENTION.md](FEDERATION-RETENTION.md) for the reasoning.
+
+- **Federation is OFF.** `scripts/setup.sh` sets `federation_domain_whitelist: []` and removes the
+  `federation` resource from the listener, so `/_matrix/federation/*` is not served at all
+  (`scripts/e2e.sh` asserts it answers 404). Teachers can only reach accounts on this server.
+  To talk to a second school later: list its domain in `federation_domain_whitelist`, add
+  `federation` back to the listener resources (or a dedicated 8448 listener behind TLS), and
+  rerun `scripts/setup.sh`.
+- **Message retention is indefinite** (Synapse default, no `retention` block). Nothing to run.
+  Revisit if Postgres grows past ~500 GB; the config to add is in FEDERATION-RETENTION.md.
+
 ## Media retention
 
 `max_upload_size: 50M` is set by `scripts/setup.sh`. Synapse keeps uploaded media indefinitely by
