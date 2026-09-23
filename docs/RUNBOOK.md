@@ -203,6 +203,7 @@ cd deploy
 docker compose pull
 docker compose up -d
 scripts/../scripts/e2e.sh   # from repo root: scripts/e2e.sh -- confirm nothing broke
+scripts/theme-guard.sh      # before and after Element bumps: verify Compound design tokens still match
 ```
 
 Never move a tag back to `:latest` -- it defeats the whole point of pinning (see
