@@ -12,3 +12,5 @@ node_modules/
 *.log
 backups/
 deploy/*recovery-key*
+deploy/rumi-release.keystore
+deploy/rumi-release-keystore.env

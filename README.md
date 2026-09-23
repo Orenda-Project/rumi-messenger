@@ -5,6 +5,12 @@ companion -- one tap away for every teacher. It exists because Meta starts billi
 service messages on 1 October 2026: this is what a Rumi deployment moves to instead of paying
 per message.
 
+## Download the app
+
+- **Android:** [download the latest Rumi APK](https://github.com/Orenda-Project/element-x-android/releases/latest) -- `arm64-v8a` for most phones, `universal` if unsure. On first launch, change the server and type your school server's address (`http(s)://your-school-server`).
+- **Web:** open your school server's URL in any browser.
+- **iOS:** not available yet.
+
 ## Why Matrix, not Signal
 
 Signal's server can't be self-hosted past registration -- contact discovery runs in an Intel SGX
