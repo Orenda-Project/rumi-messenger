@@ -59,11 +59,11 @@ Tested means we ran it and have the output or the screenshots, not that we expec
 | One-command server (Synapse, Postgres, branded Element Web) | **Tested.** `scripts/e2e.sh` passes every check |
 | End-to-end encrypted chat | **1:1 chat tested** in the web app and the Android app. Groups are ordinary Matrix rooms, but we haven't tested them separately yet |
 | Rumi as a contact: welcome invitation, questions, quizzes, numbered menus | **Tested** in the web app and the Android app (emulator) |
-| Rumi's media features (coaching, reading assessment, photo lesson plans, voice notes) | **Not tested yet** on this channel. The code path exists in [rumi-platform#104](https://github.com/Orenda-Project/rumi-platform/pull/104) |
-| Lesson plans | **Blocked** on a Gamma API key ([#11](https://github.com/Orenda-Project/rumi-messenger/issues/11)) |
-| Phone number as username, accounts created by the admin | **Tested** (`scripts/teacher.sh`, [#5](https://github.com/Orenda-Project/rumi-messenger/issues/5)). The sign-up page hint is wrong: [#18](https://github.com/Orenda-Project/rumi-messenger/issues/18) |
+| Rumi's media features (photos in, voice notes in, documents and images out) | **Tested** end to end on the Android app: a sent photo was analysed, a voice note was received and decrypted (transcription needs the speech API key), Rumi's files come back encrypted ([rumi-platform#104](https://github.com/Orenda-Project/rumi-platform/pull/104)) |
+| Lesson plans | **Blocked** on a valid Gamma API key ([#11](https://github.com/Orenda-Project/rumi-messenger/issues/11)). Without it the teacher now gets an honest failure message instead of silence |
+| Phone number as username, accounts created by the admin | **Tested** (`scripts/teacher.sh`, [#5](https://github.com/Orenda-Project/rumi-messenger/issues/5)) |
 | Find colleagues by name | **Tested** ([#10](https://github.com/Orenda-Project/rumi-messenger/issues/10)) |
-| Android app | **Builds, signs in and talks to Rumi on an emulator.** Real phones not tested yet ([#4](https://github.com/Orenda-Project/rumi-messenger/issues/4)); first public release being published ([#9](https://github.com/Orenda-Project/rumi-messenger/issues/9)) |
+| Android app | **Released** ([v0.1.1](https://github.com/Orenda-Project/element-x-android/releases/latest)). A new teacher installed it from the release page and used Rumi following only the teacher guide, 11 of 11 steps, on an emulator. Real phones not tested yet ([#4](https://github.com/Orenda-Project/rumi-messenger/issues/4)) |
 | iPhone app | **No.** Use the web app or stock Element X ([#13](https://github.com/Orenda-Project/rumi-messenger/issues/13)) |
 | Adding a second device | **Works** with a recovery key. The warning screen is scary ([#14](https://github.com/Orenda-Project/rumi-messenger/issues/14)); stale devices can block sending, and `scripts/devices.sh` fixes that |
 | Rumi's replies verified (no red shield) | **Tested** (`scripts/bot-cross-sign.sh`, [#15](https://github.com/Orenda-Project/rumi-messenger/issues/15)) |

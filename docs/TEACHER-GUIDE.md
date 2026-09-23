@@ -48,9 +48,8 @@ whether to allow installing apps from your browser. Tap **Settings**, turn on **
 source**, go back and tap **Install**. The words differ a little between phone brands. If you get
 stuck, ask your admin to do this step with you once. The app isn't in the Play Store yet.
 
-> **Coming:** the first Android release is being published now. If that page is empty, use the
-> web app below for now. A Play Store listing is tracked in
-> [#9](https://github.com/Orenda-Project/rumi-messenger/issues/9).
+> The app isn't in the Play Store yet; the release page above is the official download. If it
+> won't install on your phone, use the web app below and tell your admin.
 
 **iPhone.** There is no Rumi-branded iPhone app yet
 ([#13](https://github.com/Orenda-Project/rumi-messenger/issues/13)). You have two options. Use
