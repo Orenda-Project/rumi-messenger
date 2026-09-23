@@ -41,7 +41,7 @@ fill_env_var() {
 # `SYNAPSE_PORT=8208 ELEMENT_PORT=8283 scripts/setup.sh`). These must win over both a freshly
 # copied .env.example AND an existing deploy/.env -- otherwise `source`-ing the file below would
 # silently clobber the caller's exported values back to whatever the file says.
-OVERRIDE_VARS=(SERVER_NAME PUBLIC_BASE_URL SYNAPSE_PORT ELEMENT_PORT BIND_ADDR REGISTRATION_MODE COMPOSE_PROJECT_NAME RUMI_CONTAINER_PREFIX)
+OVERRIDE_VARS=(SERVER_NAME PUBLIC_BASE_URL SYNAPSE_PORT ELEMENT_PORT BIND_ADDR REGISTRATION_MODE COMPOSE_PROJECT_NAME RUMI_CONTAINER_PREFIX TURN_PORT TURN_MIN_PORT TURN_MAX_PORT)
 for _v in "${OVERRIDE_VARS[@]}"; do
   eval "PRESET_${_v}=\"\${${_v}:-}\""
 done
@@ -49,7 +49,7 @@ done
 # ---------------------------------------------------------------------------
 # Step 1: .env
 # ---------------------------------------------------------------------------
-log "Step 1/9: ensuring deploy/.env exists"
+log "Step 1/10: ensuring deploy/.env exists"
 if [[ ! -f "${ENV_FILE}" ]]; then
   cp "${ENV_EXAMPLE}" "${ENV_FILE}"
   chmod 600 "${ENV_FILE}"
@@ -105,6 +105,11 @@ if [[ -z "${REG_SHARED_SECRET:-}" ]]; then
   fill_env_var REG_SHARED_SECRET "${REG_SHARED_SECRET}"
   log "  generated REG_SHARED_SECRET (registration_shared_secret)"
 fi
+if [[ -z "${TURN_SHARED_SECRET:-}" ]]; then
+  TURN_SHARED_SECRET="$(rand_secret)"
+  fill_env_var TURN_SHARED_SECRET "${TURN_SHARED_SECRET}"
+  log "  generated TURN_SHARED_SECRET (coturn static-auth-secret / Synapse turn_shared_secret)"
+fi
 
 SERVER_NAME="${SERVER_NAME:-localhost}"
 PUBLIC_BASE_URL="${PUBLIC_BASE_URL:-http://localhost:8008}"
@@ -113,11 +118,23 @@ ELEMENT_PORT="${ELEMENT_PORT:-8082}"
 BIND_ADDR="${BIND_ADDR:-127.0.0.1}"
 ADMIN_USER="${ADMIN_USER:-admin}"
 REGISTRATION_MODE="${REGISTRATION_MODE:-open}"
+TURN_PORT="${TURN_PORT:-3478}"
+TURN_MIN_PORT="${TURN_MIN_PORT:-49152}"
+TURN_MAX_PORT="${TURN_MAX_PORT:-65535}"
+# The address Matrix clients (Element Web running in a teacher's browser) are told to open a
+# TURN connection to -- must be something those clients can actually reach, same requirement as
+# PUBLIC_BASE_URL itself, so we derive it from the same setting rather than inventing a second
+# one: the hostname half of PUBLIC_BASE_URL (e.g. "localhost", or "chat.yourschool.org" in
+# production).
+TURN_HOST="$(python3 -c "
+import sys, urllib.parse
+print(urllib.parse.urlsplit(sys.argv[1]).hostname or 'localhost')
+" "${PUBLIC_BASE_URL}")"
 
 # ---------------------------------------------------------------------------
 # Step 2: generate homeserver.yaml if absent
 # ---------------------------------------------------------------------------
-log "Step 2/9: Synapse homeserver.yaml"
+log "Step 2/10: Synapse homeserver.yaml"
 mkdir -p "${SYNAPSE_DATA_DIR}"
 if [[ ! -f "${SYNAPSE_DATA_DIR}/homeserver.yaml" ]]; then
   log "  homeserver.yaml missing -> generating"
@@ -129,12 +146,15 @@ fi
 # ---------------------------------------------------------------------------
 # Step 3: patch homeserver.yaml (via the synapse image's own python3+PyYAML)
 # ---------------------------------------------------------------------------
-log "Step 3/9: patching homeserver.yaml (db, registration, auto-join, uploads, presence)"
+log "Step 3/10: patching homeserver.yaml (db, registration, auto-join, uploads, presence)"
 dc run --rm \
   -e SERVER_NAME="${SERVER_NAME}" \
   -e POSTGRES_PASSWORD="${POSTGRES_PASSWORD}" \
   -e REGISTRATION_MODE="${REGISTRATION_MODE}" \
   -e REG_SHARED_SECRET="${REG_SHARED_SECRET}" \
+  -e TURN_HOST="${TURN_HOST}" \
+  -e TURN_PORT="${TURN_PORT}" \
+  -e TURN_SHARED_SECRET="${TURN_SHARED_SECRET}" \
   --entrypoint python3 synapse - <<'PYEOF'
 import os, yaml
 
@@ -193,6 +213,24 @@ config["rc_invites"] = {
     "per_user": {"per_second": 1, "burst_count": 20},
 }
 
+# TURN server for 1:1 audio/video calls (issue #1). turn_shared_secret must be the exact same
+# string as coturn's own static-auth-secret (deploy/coturn/turnserver.conf, written by step 5
+# below) -- Synapse's TURN REST API implementation mints a short-lived username/password pair
+# per client ("<unix-ts>+<user id>", HMAC-SHA1 of that over the shared secret, base64), and
+# coturn validates that same construction on connect (use-auth-secret mode). Two URIs, UDP and
+# TCP, per Matrix's own coturn guide (element-hq/synapse docs/setup/turn/coturn.md) -- clients
+# try UDP first and fall back to TCP when UDP is blocked by a restrictive firewall.
+config["turn_uris"] = [
+    f"turn:{os.environ['TURN_HOST']}:{os.environ['TURN_PORT']}?transport=udp",
+    f"turn:{os.environ['TURN_HOST']}:{os.environ['TURN_PORT']}?transport=tcp",
+]
+config["turn_shared_secret"] = os.environ["TURN_SHARED_SECRET"]
+# 24h, the same value Synapse's own docs use as their example -- credentials are per-call-session
+# scoped by the client anyway (a fresh set is fetched per call), this just bounds how long a
+# leaked credential would remain valid.
+config["turn_user_lifetime"] = 86400000
+config["turn_allow_guests"] = True
+
 with open(path, "w") as f:
     yaml.safe_dump(config, f, default_flow_style=False, sort_keys=False)
 
@@ -208,7 +246,7 @@ log "  chmod 600 on homeserver.yaml + signing key"
 # ---------------------------------------------------------------------------
 # Step 4: log config -> JSON lines to stdout (docker logs IS the log)
 # ---------------------------------------------------------------------------
-log "Step 4/9: switching Synapse log config to JSON-on-stdout"
+log "Step 4/10: switching Synapse log config to JSON-on-stdout"
 LOG_CONFIG_NAME="${SERVER_NAME}.log.config"
 # The synapse image ships neither python-json-logger nor a synapse.logging.formatter.JsonFormatter,
 # so we drop in a tiny stdlib-only formatter module and put /data on PYTHONPATH (see
@@ -255,10 +293,93 @@ chown 991:991 /data/rumi_log_format.py /data/${LOG_CONFIG_NAME}"
 log "  wrote ${SYNAPSE_DATA_DIR}/${LOG_CONFIG_NAME} + rumi_log_format.py"
 
 # ---------------------------------------------------------------------------
-# Step 5: bring the stack up
+# Step 5: coturn TURN relay config (1:1 audio/video calls, issue #1)
 # ---------------------------------------------------------------------------
-log "Step 5/9: starting postgres + synapse"
+log "Step 5/10: coturn TURN relay config"
+COTURN_DIR="${DEPLOY_DIR}/coturn"
+mkdir -p "${COTURN_DIR}"
+# A prior run chown'd this to coturn's runtime uid (65534, see below) and chmod 600'd it, which
+# this host user can't truncate/overwrite directly on a rerun -- but CAN unlink (removing a file
+# only needs write+execute on the containing directory, which this host user owns), so drop it
+# and re-render fresh every time, same idempotency shape as Element's rendered config/welcome/home.
+rm -f "${COTURN_DIR}/turnserver.conf"
+{
+  echo "# Rendered by scripts/setup.sh -- edit deploy/.env, not this file, then re-run setup.sh."
+  echo "listening-port=${TURN_PORT}"
+  echo "min-port=${TURN_MIN_PORT}"
+  echo "max-port=${TURN_MAX_PORT}"
+  # Keeps coturn off-network by default the same way BIND_ADDR keeps every other service here
+  # off-network -- network_mode: host means Compose's own ports:/BIND_ADDR binding (what Synapse
+  # and Element rely on) doesn't apply to this container, so this config line is what actually
+  # does it. 127.0.0.1 (the default) => loopback-only, exactly like the rest of the stack before
+  # the `tls` profile is turned on; 0.0.0.0 => every interface, once BIND_ADDR is set that way for
+  # a real deployment (docs/RUNBOOK.md).
+  echo "listening-ip=${BIND_ADDR}"
+  # TURN REST API short-lived credentials -- see the homeserver.yaml turn_shared_secret comment
+  # in step 3 above for the full mechanism. static-auth-secret here MUST equal turn_shared_secret
+  # there; both come from the one TURN_SHARED_SECRET value in deploy/.env.
+  echo "use-auth-secret"
+  echo "static-auth-secret=${TURN_SHARED_SECRET}"
+  echo "realm=${SERVER_NAME}"
+  # Matrix's own coturn guide (element-hq/synapse docs/setup/turn/coturn.md) recommends this for
+  # NAT traversal reliability with some client/NAT combinations.
+  echo "fingerprint"
+  # KNOWN GAP, not a silent omission: plaintext TURN only (no TLS/DTLS listener) at this stage.
+  # Real certs are the production-hardening work already tracked in issue #6 -- Caddy (the `tls`
+  # compose profile) terminates TLS for Synapse/Element, but coturn needs its OWN certificate,
+  # since a browser's WebRTC stack talks to it directly rather than through Caddy. Acceptable for
+  # now the same way the rest of this stack is BIND_ADDR=127.0.0.1-by-default and not yet
+  # publicly reachable; not acceptable to leave silently unmentioned, so: this is unencrypted
+  # until #6. See docs/RUNBOOK.md.
+  #
+  # Only `no-tls` is a real coturn 4.18.0 directive (disables the TLS listener). There is no
+  # `no-dtls` in this version -- DTLS is opt-IN via a separate `--dtls` flag that defaults to off
+  # (confirmed against this exact pinned image's own `turnserver -h`; an earlier draft of this
+  # file carried a `no-dtls` line copied from older coturn docs, which 4.18.0 logs as "Bad
+  # configuration format: no-dtls" and ignores -- harmless since DTLS was never on, but wrong,
+  # so removed rather than left in as dead/misleading config). See docs/DECISIONS.tsv.
+  echo "no-tls"
+  echo "log-file=stdout"
+  echo "simple-log"
+  if [[ -n "${TURN_EXTERNAL_IP:-}" ]]; then
+    echo "external-ip=${TURN_EXTERNAL_IP}"
+  fi
+} > "${COTURN_DIR}/turnserver.conf"
+# turnserver.conf holds TURN_SHARED_SECRET in plaintext, same trust tier as homeserver.yaml --
+# but coturn's image runs as a fixed "nobody" (uid/gid 65534), not a uid this host user can
+# `chown` to directly, and the compose service mounts the file `:ro` (so a container running
+# under that mount can't chown/chmod it either). Same fix as homeserver.yaml's uid-991 case:
+# chown to the exact runtime uid from a throwaway container run AS ROOT against a writable
+# mount of the directory (not the `:ro` service mount), then lock it down to owner-only.
+COTURN_IMAGE="$(dc config --images coturn)"
+docker run --rm --user root --entrypoint sh \
+  -v "${COTURN_DIR}:/data" \
+  "${COTURN_IMAGE}" \
+  -c "chown 65534:65534 /data/turnserver.conf && chmod 600 /data/turnserver.conf"
+log "  wrote deploy/coturn/turnserver.conf (listening-ip=${BIND_ADDR}, realm=${SERVER_NAME}, turn_uris host=${TURN_HOST})"
+
+# ---------------------------------------------------------------------------
+# Step 6: bring the stack up
+# ---------------------------------------------------------------------------
+log "Step 6/10: starting postgres + synapse + coturn"
 dc up -d postgres synapse
+# Restart (not recreate -- image/mounts are unchanged, only homeserver.yaml's *content* was, by
+# step 3, which runs unconditionally on every invocation): Synapse reads homeserver.yaml once at
+# startup, it does not hot-reload turn_uris/turn_shared_secret. On a fresh install this is a
+# harmless restart of a container that just started seconds ago; on a rerun against an
+# ALREADY-RUNNING stack (exactly the scenario this was found in) it's the only thing that makes
+# a homeserver.yaml edit actually take effect -- discovered live: turnServer returned `{}` after
+# adding turn_uris to a running Synapse's config file with no restart, RUNBOOK.md's existing
+# "Rate limits" section already documents this same requirement for a *manual* edit, this just
+# makes setup.sh's own automatic edits honor it too instead of silently no-op'ing on a rerun.
+dc restart synapse
+# --force-recreate: same reasoning as element's force-recreate in step 9 -- turnserver.conf was
+# just rewritten in place (fresh secret file, same path/mount/image), and a plain `up -d` no-ops
+# on a container already running with the same image+mount config even though the file's bytes
+# changed underneath it, leaving a stale coturn serving whatever config existed at its first
+# start. A prior run of this exact script hit precisely that: coturn kept running for 2+ minutes
+# on a config it couldn't even read, discovered live while writing this script.
+dc up -d --force-recreate coturn
 
 log "  waiting for Synapse /_matrix/client/versions"
 for i in $(seq 1 60); do
@@ -275,9 +396,9 @@ for i in $(seq 1 60); do
 done
 
 # ---------------------------------------------------------------------------
-# Step 6: admin + bot accounts
+# Step 7: admin + bot accounts
 # ---------------------------------------------------------------------------
-log "Step 6/9: admin + @rumi bot accounts"
+log "Step 7/10: admin + @rumi bot accounts"
 
 register_user() {
   local username="$1" password="$2" admin_flag="$3"
@@ -373,7 +494,7 @@ fi
 # ---------------------------------------------------------------------------
 # Step 7: ensure #rumi-announcements exists
 # ---------------------------------------------------------------------------
-log "Step 7/9: ensuring #rumi-announcements exists"
+log "Step 8/10: ensuring #rumi-announcements exists"
 ALIAS="%23rumi-announcements:${SERVER_NAME}"
 set +e
 RESOLVE_HTTP=$(curl -s -o /tmp/rumi-alias-resolve.json -w '%{http_code}' \
@@ -396,9 +517,9 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-# Step 8: render Element config + welcome page from the branded templates
+# Step 9: render Element config + welcome page from the branded templates
 # ---------------------------------------------------------------------------
-log "Step 8/9: rendering deploy/element/{config.json,welcome.html,home.html}"
+log "Step 9/10: rendering deploy/element/{config.json,welcome.html,home.html}"
 
 # Substitutes the literal placeholders __SERVER_NAME__ / __PUBLIC_BASE_URL__ in a template file
 # and writes the result. Used for both config.template.json -> config.json and
@@ -492,15 +613,17 @@ log "  starting element (force-recreate so rendered config/welcome/home are alwa
 dc up -d --force-recreate --wait element
 
 # ---------------------------------------------------------------------------
-# Step 9: summary
+# Step 10: summary
 # ---------------------------------------------------------------------------
-log "Step 9/9: done"
+log "Step 10/10: done"
 echo
 echo "================================================================"
 echo " Rumi Messenger is up"
 echo "================================================================"
 echo " Element Web:   http://${BIND_ADDR}:${ELEMENT_PORT}"
 echo " Synapse:       http://${BIND_ADDR}:${SYNAPSE_PORT}"
+echo " TURN (calls):  ${TURN_HOST}:${TURN_PORT} (udp+tcp), relay ports ${TURN_MIN_PORT}-${TURN_MAX_PORT}"
+echo "                plaintext only (no-tls; DTLS off by default) until issue #6; see docs/RUNBOOK.md"
 echo " Server name:   ${SERVER_NAME}"
 echo
 echo " Admin account:   ${ADMIN_USER}"

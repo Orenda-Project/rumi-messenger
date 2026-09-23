@@ -111,6 +111,7 @@ which process and which API call): [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 | Self-hosted homeserver, your own domain | Yes -- Synapse + Postgres, one command |
 | End-to-end encryption | Yes on the client side (Olm/Megolm), automatic in Element. On the Rumi side, E2EE needs **Node 24+** in rumi-platform (`@matrix-org/matrix-sdk-crypto-nodejs` declares `engines.node: ">=24"` and has no prebuilt binary below that) -- on an older Node, leaving `MATRIX_E2EE` unset auto-downgrades to plaintext with a clear warning instead of crashing; setting it to `on` explicitly makes startup fail loudly instead, so an operator who asked for encryption is never silently handed plaintext. See [docs/RUMI-INTEGRATION.md](docs/RUMI-INTEGRATION.md#3-start-rumi-platform-on-node-24-for-end-to-end-encryption) |
 | 1:1 chat, groups, DMs | Yes -- ordinary Matrix rooms |
+| One-to-one audio and video calls | Yes -- Element's built-in call button, relayed through a `coturn` TURN server so it actually works across two different NATs, not just two browser tabs on the same machine. Ships plaintext (`no-tls`) and loopback-only by default, same as the rest of this stack; real cross-device calling needs the `tls`/production setup (`BIND_ADDR=0.0.0.0`, a real domain, `TURN_EXTERNAL_IP`) covered by issue #6. See [docs/RUNBOOK.md](docs/RUNBOOK.md#calls-11-audiovideo-issue-1). Closes [#1](https://github.com/Orenda-Project/rumi-messenger/issues/1). Group calls/screen sharing are a separate, not-yet-built feature ([#2](https://github.com/Orenda-Project/rumi-messenger/issues/2)) |
 | Rumi as a first-class contact | Yes, two independent paths: server-side, new accounts auto-join `#rumi-announcements` and Rumi DMs them first; client-side, the logged-in home page's primary button is "Talk to Rumi" (see [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md#the-welcome-dm-mechanism) for why this isn't the client-side `welcome_user_id` feature you may have read about -- Element removed it) |
 | Phone-number identity / "find teachers by number" | **No.** Accounts are Matrix user ids, not phone numbers -- there's no contact-discovery-by-phone-number the way WhatsApp has. See [docs/MOBILE.md](docs/MOBILE.md#the-honest-limits) |
 | Mobile apps | No dedicated Rumi app. Element X (iOS/Android) or FluffyChat point at your server and work fully, including talking to Rumi -- see [docs/MOBILE.md](docs/MOBILE.md) |
@@ -133,11 +134,12 @@ exists because these are open.
 | [matrix-rust-sdk](https://github.com/matrix-org/matrix-rust-sdk) | The encryption that makes Rumi's own messages end-to-end encrypted | Apache-2.0 |
 | [PostgreSQL](https://www.postgresql.org/) | Synapse's database | PostgreSQL licence |
 | [Caddy](https://github.com/caddyserver/caddy) | Certificates and the front door, in the `tls` profile | Apache-2.0 |
+| [coturn](https://github.com/coturn/coturn) | The TURN relay that makes Element's 1:1 call button work across two real NATs, not just two browser tabs | BSD-3-Clause |
 
 On phones, teachers use [Element X](https://github.com/element-hq/element-x-android) or
 [FluffyChat](https://github.com/krille-chan/fluffychat), both AGPL-3.0, pointed at their own server.
-Calling, when we get there, will use [coturn](https://github.com/coturn/coturn) and
-[LiveKit](https://github.com/livekit/livekit).
+Group calls and screen sharing, when we get there, will use
+[LiveKit](https://github.com/livekit/livekit) (tracked separately, [#2](https://github.com/Orenda-Project/rumi-messenger/issues/2)).
 
 ### Contributing back
 

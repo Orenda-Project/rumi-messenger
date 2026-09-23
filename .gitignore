@@ -4,6 +4,7 @@ deploy/rumi-channel.env
 deploy/element/config.json
 deploy/element/welcome.html
 deploy/element/home.html
+deploy/coturn/turnserver.conf
 .env
 node_modules/
 *.log

@@ -144,6 +144,65 @@ Element's Compound design-system tokens (`--cpd-color-*`) that theme the newer
 Compound-based UI surfaces (buttons, action colors) that the older `colors` keys alone don't
 reach.
 
+## Calls: the TURN relay (coturn), and the shared-secret credential mechanism
+
+Element's built-in 1:1 call button (issue #1) needs more than Synapse: the signalling (who's
+calling whom, session setup) goes through Synapse like any other Matrix event, but the actual
+audio/video media is WebRTC, negotiated directly between the two clients wherever possible. Two
+devices behind separate home routers or mobile NAT almost always cannot reach each other directly
+for that media stream, so a **TURN server** relays it -- this stack runs
+[coturn](https://github.com/coturn/coturn) (`deploy/docker-compose.yml`) for exactly that.
+
+### Why coturn needs its own credentials, not just Synapse's session auth
+
+A Matrix access token proves who you are to Synapse. It proves nothing to coturn -- coturn is a
+separate process, speaking a separate protocol (TURN/STUN, not Matrix's client-server API), that
+has no idea what a Matrix access token is. Synapse's job is to hand each client a **TURN-specific**
+credential pair it can present to coturn instead. Matrix's own coturn guide
+(`element-hq/synapse` `docs/setup/turn/coturn.md`) documents the mechanism both sides implement,
+usually called the **TURN REST API** approach:
+
+1. Synapse and coturn are configured with one shared secret ahead of time -- here, the single
+   `TURN_SHARED_SECRET` value in `deploy/.env`, written into both `homeserver.yaml`'s
+   `turn_shared_secret` and `turnserver.conf`'s `static-auth-secret` by `scripts/setup.sh` (step 3
+   and step 5 respectively -- see the comments there for the exact code).
+2. When a client calls `GET /_matrix/client/v3/voip/turnServer` (with its ordinary Matrix access
+   token, proving identity to *Synapse*), Synapse computes, **entirely locally, without ever
+   contacting coturn**:
+   - `username = "<unix-timestamp>:<matrix-user-id>"` (the timestamp makes it time-limited --
+     `turn_user_lifetime` in `homeserver.yaml`, 24h here, bounds how long a leaked credential
+     stays valid)
+   - `password = base64(hmac-sha1(turn_shared_secret, username))`
+   and returns `{uris, username, password, ttl}` to the client.
+3. The client then presents that exact `username`/`password` pair to coturn as ordinary TURN
+   long-term credentials. coturn, configured with `use-auth-secret` (its "TURN REST API" mode)
+   and the SAME `static-auth-secret`, recomputes the identical HMAC over the username it was
+   handed and accepts the allocation if it matches -- it never talks to Synapse either; the
+   shared secret is what lets two processes that never communicate with each other agree on
+   whether a credential is valid.
+
+**The consequence that matters for testing this:** step 2 is pure local computation. Synapse
+returning a well-formed `{uris, username, password, ttl}` response proves `homeserver.yaml` is
+configured correctly -- it proves *nothing* about whether coturn is actually running, reachable,
+or configured with the same secret. This was caught in review: an early version of
+`scripts/e2e.sh` checked only step 2's response and reported a fully healthy calling setup with
+coturn stopped for the entire test run. `scripts/e2e.sh` now also drives a real TURN `ALLOCATE`
+against coturn itself (`docker exec ... turnutils_uclient`, using the exact credentials Synapse
+returned) specifically because step 2 alone cannot catch that class of failure -- see
+`docs/RUNBOOK.md`'s "Calls" section for the full verification recipe and `docs/DECISIONS.tsv` for
+the live repro.
+
+### Why plaintext TURN, and why `network_mode: host`
+
+`turnserver.conf` runs `no-tls` (no TLS/DTLS listener) -- a real certificate is production-hardening
+work already tracked in issue #6, and coturn needs its own certificate since a browser's WebRTC
+stack talks to it directly rather than through Caddy. `network_mode: host` (rather than this
+file's usual bridge-plus-explicit-port-mapping style) is coturn's own documented recommendation,
+because a TURN allocation claims one dedicated UDP port per active call leg out of a wide range
+(49152-65535 by default) -- see the comment above the `coturn` service in
+`deploy/docker-compose.yml` and `docs/DECISIONS.tsv` for the citation. Both are known,
+documented-not-silent gaps until issue #6's production hardening; see `docs/RUNBOOK.md`.
+
 ## Why we do not fork Element or Synapse
 
 This is the question everyone asks first, so it is worth answering plainly.
@@ -207,6 +266,7 @@ channel or a full WhatsApp replacement, rather than being started by accident.
 | Synapse | Official image, unmodified | AGPL-3.0 |
 | Element Web | Official image, unmodified, configured | AGPL-3.0 |
 | PostgreSQL | Official image, unmodified | PostgreSQL licence |
+| coturn | Official image, unmodified, configured | BSD-3-Clause |
 | matrix-bot-sdk | npm dependency in rumi-platform | MIT |
 | matrix-sdk-crypto-nodejs | npm dependency in rumi-platform | Apache-2.0 |
 | This repository | Our own work | Apache-2.0 |

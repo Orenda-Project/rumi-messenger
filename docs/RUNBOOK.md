@@ -120,6 +120,85 @@ Caddy handles `/.well-known/matrix/server` and `/.well-known/matrix/client` for 
 automatic TLS via Let's Encrypt as long as ports 80/443 are reachable from the internet for the
 ACME challenge.
 
+## Calls (1:1 audio/video, issue #1)
+
+Element's built-in call button works out of the box between two browser tabs on the same
+machine -- that is not evidence it works between two real devices. Two devices behind separate
+home routers or mobile NAT almost always cannot reach each other directly for the actual audio/
+video media stream (only the signalling -- who's calling whom -- goes through Synapse); a TURN
+server relays that media. This stack runs one: `coturn` (`deploy/docker-compose.yml`), configured
+by `scripts/setup.sh` from `deploy/coturn/turnserver.conf` (gitignored, rendered fresh every run),
+using the TURN REST API mechanism -- Synapse and coturn share one secret (`TURN_SHARED_SECRET` in
+`deploy/.env`) and each independently derive the same short-lived, per-call username/password from
+it (`turn_shared_secret` in `homeserver.yaml` / `static-auth-secret` in `turnserver.conf` -- see
+[docs/ARCHITECTURE.md's "Calls" section](ARCHITECTURE.md#calls-the-turn-relay-coturn-and-the-shared-secret-credential-mechanism)
+for the full mechanism, why Synapse's `turnServer` response alone can't prove coturn is alive, and citations).
+
+### Ports that must be reachable, and why UDP matters
+
+| Port(s) | Protocol | Purpose |
+|---|---|---|
+| `TURN_PORT` (3478 default) | TCP + UDP | STUN/TURN signalling: client asks coturn to allocate a relay |
+| `TURN_MIN_PORT`-`TURN_MAX_PORT` (49152-65535 default) | **UDP only** | The actual relayed call media -- one dedicated port per active call leg |
+
+Both a teacher's Element client AND coturn need **UDP** reachable end to end for the relay
+ports, not just the signalling port on 3478. WebRTC media is UDP because it's real-time (a
+retransmitted late video frame is useless) -- a network that allows TCP but blocks UDP (some
+locked-down school/office firewalls do exactly this) will let the call connect and then produce
+no audio/video, which looks like a broken app rather than a blocked port. This is also why coturn
+runs with `network_mode: host` instead of this file's usual bridge-plus-port-mapping style: Docker
+publishing all ~16k of those UDP ports individually is what coturn's own documentation warns
+against (`docs/DECISIONS.tsv`).
+
+### Local testing vs. a real deployment
+
+`BIND_ADDR=127.0.0.1` (this stack's default, same as Synapse/Element) makes coturn's
+`listening-ip` loopback-only -- calls placed between two browser tabs on the same machine will
+allocate and relay successfully (you can prove the mechanism works, see below), but **this is
+USELESS for a real call between two different devices**, for the same reason a Synapse bound to
+127.0.0.1 is useless for a real cross-device chat: nothing outside the host can reach it. This is
+not a bug to route around locally -- it's the same safe-by-default posture as the rest of this
+stack (see "Moving to a real domain (TLS)" above), and going live with real calling needs that
+same production-hardening work, tracked in **issue #6**: a real public IP/domain, `BIND_ADDR=0.0.0.0`,
+and -- specifically for coturn -- setting `TURN_EXTERNAL_IP` in `deploy/.env` so coturn tells
+clients the address actually reachable from off-host (see the comment above that var in
+`deploy/.env.example`; a coturn behind NAT that doesn't advertise its public IP will hand clients
+a private, unreachable relay address).
+
+Also a known, explicit gap until issue #6: coturn currently runs `no-tls` (plaintext TURN/STUN,
+no TLS/DTLS listener) -- see the comment above `no-tls` in `scripts/setup.sh`'s coturn config
+step for why (a separate certificate from Synapse/Element's, since a browser's WebRTC stack talks
+to coturn directly, not through Caddy).
+
+### How to verify a real call actually works
+
+There is no way to prove real NAT traversal between two independent networks from one machine --
+that is a fundamental limitation of testing this from a single host, not a gap in the setup. What
+can be verified locally (and is, by `scripts/e2e.sh`):
+
+```bash
+scripts/e2e.sh   # includes: GET /_matrix/client/v3/voip/turnServer returns real, non-empty
+                 # TURN credentials (uris/username/password/ttl) for a real logged-in user
+```
+
+and, directly against coturn itself (proves the server is listening and answering, not just that
+Synapse is configured to point at it):
+
+```bash
+docker exec rumi-coturn turnutils_stunclient -p 3478 127.0.0.1
+# -> "IPv4. UDP reflexive addr: 127.0.0.1:<port>" means coturn answered a real STUN binding request
+```
+
+Neither of those places an actual call or proves two different devices can reach each other. The
+one test that does needs a human, on two genuinely separate networks (e.g. your home WiFi and
+your phone's mobile data with WiFi off, not two devices on the same router):
+
+1. Deploy with `BIND_ADDR=0.0.0.0`, a real domain, and `TURN_EXTERNAL_IP` set (see above).
+2. Sign in as two different accounts on the two devices, on two different networks.
+3. Open a DM, start a call, and confirm audio/video actually flows both ways -- not just that
+   the call connects (a connected-but-silent call is the exact symptom of the "UDP blocked"
+   failure mode described above).
+
 ## Registration modes
 
 Set in `deploy/.env` (`REGISTRATION_MODE`), applied by `scripts/setup.sh` step 3:
@@ -223,3 +302,7 @@ API](https://element-hq.github.io/synapse/latest/admin_api/media_admin_api.html)
 | `welcome.html` or `home.html` shows a literal `__SERVER_NAME__` | curling `/welcome.html` doesn't show a `#/register` link, or `/home.html` doesn't show `@rumi:<server>` | You're looking at `deploy/element/welcome.template.html`/`home.template.html` directly, or `setup.sh` didn't run. The non-`.template` files are gitignored, rendered output -- re-run `scripts/setup.sh`, which renders both fresh every time (step 8) and force-recreates `element` so the container picks them up. |
 | Synapse container never reports healthy | `docker compose ps` shows `synapse` stuck `starting` past ~40s | Check `scripts/logs.sh -s synapse` for a config or Postgres-connection error. The healthcheck hits `http://localhost:8008/health` inside the container -- if Postgres itself isn't healthy yet, Synapse won't start (Compose's `depends_on: condition: service_healthy` should prevent this, but a manual `docker compose up -d synapse` without `postgres` running first will hit it). |
 | `docker compose logs` shows plain text, not JSON, for Synapse | Missing `/data/rumi_log_format.py` or stale `homeserver.yaml`/log config from before this stack's setup | Re-run `scripts/setup.sh` -- step 4 regenerates `rumi_log_format.py` and the log config idempotently even if `homeserver.yaml` already exists. |
+| `GET /_matrix/client/v3/voip/turnServer` returns `{}` | Synapse's config has `turn_uris` (check with an admin `docker compose exec synapse cat /data/homeserver.yaml`), but the endpoint still answers empty | Synapse only reads homeserver.yaml at process start -- it does not hot-reload TURN config. `scripts/setup.sh` step 6 now restarts synapse after every homeserver.yaml patch specifically because of this (discovered live building the calling feature); a manual homeserver.yaml edit still needs `docker compose restart synapse` per the "Rate limits" section above. |
+| coturn logs `WARNING Bad configuration format: no-dtls` on startup | (cosmetic, not fatal -- coturn still starts and works) | Would indicate a stale `deploy/coturn/turnserver.conf` from before this repo's coturn 4.18.0 pin -- that version removed the `no-dtls` directive (DTLS is opt-in via a separate `--dtls` flag, off by default). Re-run `scripts/setup.sh`, which renders a fresh `turnserver.conf` without it every time. |
+| `docker compose up -d coturn` doesn't pick up a `turnserver.conf` change | `docker logs rumi-coturn` shows a config from before your edit, or (worse) `WARNING NO EXPLICIT LISTENER ADDRESS(ES) ARE CONFIGURED` binding every interface instead of `BIND_ADDR` | Same stale-container-after-rewriting-a-mounted-file issue Element already had (see the `welcome.html`/`home.html` row above) -- `scripts/setup.sh` force-recreates `coturn` every run for exactly this reason (discovered live: coturn ran for 2+ minutes on a config it couldn't even read after a plain `up -d` no-op'd). If you edit `turnserver.conf` by hand outside `setup.sh`, run `docker compose up -d --force-recreate coturn` yourself, not a plain `up -d`. |
+| coturn's `turnserver.conf` can't be rewritten on a rerun | `scripts/setup.sh` fails with `Permission denied` writing `deploy/coturn/turnserver.conf` | Expected and handled: a prior run `chown`'d the file to coturn's fixed runtime uid (65534, "nobody") and `chmod 600`'d it so the container can read a secret it doesn't own the host-side copy of. `setup.sh` `rm -f`s the file before re-rendering (removing a file only needs write access to its *directory*, which your host user does own) -- if you see this error, something removed that `rm -f` step. |

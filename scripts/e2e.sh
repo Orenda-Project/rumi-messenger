@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Rumi Messenger -- end-to-end verification. Exits non-zero if any check fails.
 # Prints one clean PASS/FAIL line per check (never a Python traceback, even if Synapse/Element
-# are down) and moves on. Requires: bash, curl, python3. Run scripts/setup.sh first.
+# are down) and moves on. Requires: bash, curl, python3, docker (for the coturn liveness check
+# only -- everything else is pure curl/python3). Run scripts/setup.sh first.
 set -uo pipefail
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" >/dev/null 2>&1 && pwd)"
@@ -22,6 +23,8 @@ SERVER_NAME="${SERVER_NAME:-localhost}"
 BIND_ADDR="${BIND_ADDR:-127.0.0.1}"
 SYNAPSE_PORT="${SYNAPSE_PORT:-8008}"
 ELEMENT_PORT="${ELEMENT_PORT:-8082}"
+TURN_PORT="${TURN_PORT:-3478}"
+RUMI_CONTAINER_PREFIX="${RUMI_CONTAINER_PREFIX:-rumi}"
 SYNAPSE_URL="http://${BIND_ADDR}:${SYNAPSE_PORT}"
 ELEMENT_URL="http://${BIND_ADDR}:${ELEMENT_PORT}"
 
@@ -96,6 +99,22 @@ if not isinstance(chunk, list):
 found = any(isinstance(e, dict) and e.get('content', {}).get('body') == body for e in chunk)
 print('1' if found else '0')
 " "${json}" "${body}" 2>/dev/null
+}
+
+json_list_nonempty() {
+  # args: <json-string> <list-key> -- prints 1/0, never raises. Used for turnServer's "uris",
+  # where we only care that Synapse handed back at least one, not which.
+  local json="$1" key="$2"
+  python3 -c "
+import json, sys
+raw, key = sys.argv[1], sys.argv[2]
+try:
+    d = json.loads(raw)
+except Exception:
+    d = {}
+lst = d.get(key, []) if isinstance(d, dict) else []
+print('1' if isinstance(lst, list) and len(lst) > 0 else '0')
+" "${json}" "${key}" 2>/dev/null
 }
 
 cleanup() {
@@ -293,10 +312,69 @@ if [[ "${REGISTER_OK}" == "1" ]]; then
     check "A -> @rumi DM message lands in room" 0 "createRoom failed: error='$(json_field "${RUMI_DM_RESP}" error)'"
   fi
 
+  # -------------------------------------------------------------------------
+  # 7. TURN credentials for calls (issue #1). Two checks, deliberately separate:
+  #
+  #    (a) Synapse's own turnServer endpoint returns a non-empty, well-shaped response.
+  #        IMPORTANT: Synapse computes this ENTIRELY locally from turn_shared_secret in its own
+  #        config -- it never contacts coturn to produce it. This check on its own proves only
+  #        that homeserver.yaml is wired correctly; it PASSES even if coturn is dead (caught in
+  #        review -- an earlier version of this script had only this check, so `e2e.sh` could
+  #        report a healthy calling setup with coturn stopped the entire time).
+  #    (b) coturn itself is actually alive and accepts those EXACT credentials for a real TURN
+  #        ALLOCATE. This is the one that can fail. Runs turnutils_uclient (already inside the
+  #        coturn image, no new dependency beyond docker) via `docker exec` rather than curling
+  #        coturn directly, because BIND_ADDR may legitimately keep coturn off the host network
+  #        entirely (127.0.0.1-only local testing) the same way Synapse/Element are -- `docker
+  #        exec` reaches it from inside its own container regardless of what it's bound to on
+  #        the host. A successful ALLOCATE (logged as "Received relay addr") proves auth +
+  #        liveness together; the subsequent channel-bind failing with 403 is coturn's own
+  #        deliberate denied-peer-ip-for-loopback protection kicking in (see docs/RUNBOOK.md),
+  #        not an auth problem, so this check does not require it to succeed.
+  #
+  #    Neither proves NAT traversal between two real devices; see docs/RUNBOOK.md for why that
+  #    can't be checked from one machine.
+  # -------------------------------------------------------------------------
+  TURN_JSON="$(mxc_call GET "${TOKEN_A}" "/_matrix/client/v3/voip/turnServer")"
+  TURN_URIS_OK=0
+  [[ "$(json_list_nonempty "${TURN_JSON}" uris)" == "1" ]] && TURN_URIS_OK=1
+  TURN_USERNAME="$(json_field "${TURN_JSON}" username)"
+  TURN_PASSWORD="$(json_field "${TURN_JSON}" password)"
+  TURN_TTL="$(json_field "${TURN_JSON}" ttl)"
+  TURN_OK=0
+  if [[ "${TURN_URIS_OK}" == "1" && -n "${TURN_USERNAME}" && -n "${TURN_PASSWORD}" && -n "${TURN_TTL}" ]]; then
+    TURN_OK=1
+  fi
+  check "GET /_matrix/client/v3/voip/turnServer returns TURN credentials (Synapse-side config only -- does NOT prove coturn is up, see next check)" "${TURN_OK}" \
+    "uris_nonempty=${TURN_URIS_OK} username='${TURN_USERNAME}' password_set=$([[ -n "${TURN_PASSWORD}" ]] && echo yes || echo no) ttl='${TURN_TTL}'"
+
+  COTURN_CONTAINER="${RUMI_CONTAINER_PREFIX}-coturn"
+  TURN_LIVE_OK=0
+  TURN_LIVE_DETAIL="skipped: no credentials to test (previous check failed)"
+  if [[ "${TURN_OK}" == "1" ]]; then
+    if [[ "$(docker inspect -f '{{.State.Running}}' "${COTURN_CONTAINER}" 2>/dev/null)" != "true" ]]; then
+      TURN_LIVE_DETAIL="container ${COTURN_CONTAINER} not found or not running"
+    else
+      # Bounded with `timeout`: wrong/stale credentials make turnutils_uclient retry allocate
+      # for ~15s before giving up (verified live) rather than failing fast -- a real "coturn is
+      # dead" case fails via docker exec itself, near-instantly.
+      UCLIENT_OUT="$(timeout 20 docker exec "${COTURN_CONTAINER}" \
+        turnutils_uclient -p "${TURN_PORT}" -u "${TURN_USERNAME}" -w "${TURN_PASSWORD}" -y -v -n 1 127.0.0.1 2>&1)"
+      if echo "${UCLIENT_OUT}" | grep -q "Received relay addr"; then
+        TURN_LIVE_OK=1
+      else
+        TURN_LIVE_DETAIL="turnutils_uclient never completed an ALLOCATE with these credentials -- last lines: $(echo "${UCLIENT_OUT}" | tail -3 | tr '\n' ' ')"
+      fi
+    fi
+  fi
+  check "coturn is alive and honors the Synapse-issued TURN credentials (docker exec turnutils_uclient ALLOCATE)" "${TURN_LIVE_OK}" "${TURN_LIVE_DETAIL}"
+
 else
   check "user A auto-joined #rumi-announcements" 0 "skipped: user registration failed"
   check "A -> B DM roundtrip (send + readback)" 0 "skipped: user registration failed"
   check "A -> @rumi DM message lands in room" 0 "skipped: user registration failed"
+  check "GET /_matrix/client/v3/voip/turnServer returns TURN credentials (Synapse-side config only -- does NOT prove coturn is up, see next check)" 0 "skipped: user registration failed"
+  check "coturn is alive and honors the Synapse-issued TURN credentials (docker exec turnutils_uclient ALLOCATE)" 0 "skipped: user registration failed"
 fi
 
 # ---------------------------------------------------------------------------

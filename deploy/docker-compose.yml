@@ -89,6 +89,49 @@ services:
       retries: 10
       start_period: 10s
 
+  coturn:
+    # Pinned to the exact version resolved from :latest on 2026-09-23 (coturn/coturn 4.18.0,
+    # github.com/coturn/coturn release "4.18.0"). To upgrade: check
+    # https://github.com/coturn/coturn/releases, bump this tag, then
+    # `docker compose pull && docker compose up -d coturn`.
+    image: coturn/coturn:4.18.0
+    container_name: ${RUMI_CONTAINER_PREFIX:-rumi}-coturn
+    restart: unless-stopped
+    logging: *default-logging
+    # network_mode: host, NOT the bridge-plus-explicit-port-mapping style every other service in
+    # this file uses. coturn's own Docker docs say to do this: "use the host network directly
+    # (recommended, as Docker performs badly with large port ranges)"
+    # (github.com/coturn/coturn docker/coturn/README.md). The reason is the UDP relay: a TURN
+    # allocation claims one dedicated UDP port per active call leg out of a wide range (min-port
+    # to max-port below, 49152-65535 by default per RFC 5766 Section 6.2 and Synapse's own
+    # coturn guide, element-hq/synapse docs/setup/turn/coturn.md) -- Docker's bridge networking
+    # would need all ~16k of those individually published (`-p 49152-65535:49152-65535/udp`),
+    # which coturn's own docs describe as "performs badly" -- Docker's userland-proxy approach to
+    # port publishing does not scale to a range this wide, so real calls can end up starting but
+    # then failing to actually relay media through the wrong ports. Every other
+    # service here (Synapse, Element) only ever needs ONE port each, so bridge + explicit mapping
+    # is the right (and safer, off-network-by-default) choice for them; coturn is the one service
+    # where that pattern breaks down. See docs/DECISIONS.tsv.
+    #
+    # Trade-off this creates: `listening-ip` below (rendered from BIND_ADDR by scripts/setup.sh)
+    # is what keeps coturn off-network by default instead of Compose's own port publishing --
+    # host networking bypasses `ports:`/BIND_ADDR entirely, so without that config line coturn
+    # would bind every host interface regardless of BIND_ADDR. See docs/RUNBOOK.md.
+    network_mode: host
+    volumes:
+      - ./coturn/turnserver.conf:/etc/coturn/turnserver.conf:ro
+    command: ["turnserver", "-c", "/etc/coturn/turnserver.conf"]
+    healthcheck:
+      # STUN binding request against our own listener -- proves the process is actually
+      # answering TURN/STUN traffic, not just running. Always against 127.0.0.1: with
+      # network_mode: host, coturn listens on loopback regardless of what `listening-ip` (BIND_ADDR)
+      # is set to, so this works whether the deployment is local-only or public.
+      test: ["CMD", "turnutils_stunclient", "-p", "${TURN_PORT:-3478}", "127.0.0.1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+
   # Optional TLS/reverse-proxy front door for a real domain. Not started by default --
   # `docker compose --profile tls up -d` brings it up. See deploy/Caddyfile.
   caddy:
