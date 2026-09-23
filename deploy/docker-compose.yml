@@ -68,7 +68,7 @@ services:
     # Pinned to the specific release resolved from :latest on 2026-09-21 (Element Web v1.12.28).
     # To upgrade: check https://github.com/element-hq/element-web/releases, bump this tag, then
     # `docker compose pull && docker compose up -d element`.
-    image: vectorim/element-web:v1.12.28
+    image: vectorim/element-web:v1.12.29
     container_name: ${RUMI_CONTAINER_PREFIX:-rumi}-element
     restart: unless-stopped
     logging: *default-logging
