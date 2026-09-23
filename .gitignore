@@ -11,3 +11,4 @@ deploy/sygnal/fcm-service-account.json
 node_modules/
 *.log
 backups/
+deploy/*recovery-key*

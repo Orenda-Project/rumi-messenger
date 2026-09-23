@@ -1,0 +1,7 @@
+{
+  "name": "bot-cross-sign",
+  "private": true,
+  "type": "module",
+  "description": "One-shot out-of-band cross-signing for the Rumi bot account (rumi-messenger#15)",
+  "dependencies": { "matrix-js-sdk": "42.4.0" }
+}

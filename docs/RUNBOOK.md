@@ -370,6 +370,44 @@ curl -s -X POST "http://127.0.0.1:8108/_synapse/admin/v1/deactivate/@newteacher:
 
 Both verified live above against a throwaway `@runbooktest:localhost` account.
 
+## Rumi's replies show a red "unverified device" shield (issue #15)
+
+Cause: the bot (matrix-bot-sdk 0.8.0) never creates cross-signing keys, so its device is
+"not verified by its owner" and Element draws a red shield on every reply. The bot cannot fix
+this itself (its RustEngine throws on the SignatureUpload/KeysBackup requests cross-signing
+needs), so it is done out-of-band, once, without touching the bot process:
+
+```bash
+scripts/bot-cross-sign.sh          # @rumi, RUMI_BOT_PASSWORD, device of the token in deploy/rumi-channel.env
+```
+
+What it does: logs in as @rumi on a *temporary* matrix-js-sdk device, creates secret storage
+(recovery key written to `deploy/rumi-cross-signing-recovery-key.txt`, chmod 600, gitignored),
+creates the cross-signing keys, signs the bot's existing device with the self-signing key, then
+logs the temporary device out. No bot restart; `.matrix-storage`, the bot's token and its device
+are never touched. Re-running is a no-op once the device is signed. If the bot ever gets a new
+device/token, just re-run: it reloads the keys from secret storage with the recovery key and
+signs the new device. **Back up the recovery key file** -- without it the script refuses to run
+again (re-creating keys would be an identity reset, which teachers see as "Rumi's identity changed").
+
+Check it worked (any teacher token):
+
+```bash
+curl -s -X POST -H "Authorization: Bearer $TOKEN" http://127.0.0.1:8108/_matrix/client/v3/keys/query \
+  -d '{"device_keys":{"@rumi:localhost":[]}}'
+# master_keys + self_signing_keys present for @rumi, and the bot device's "signatures" include
+# the ed25519 self-signing key id next to its own ed25519:<DEVICE> key.
+```
+
+Stale @rumi devices: `scripts/devices.sh list rumi` also shows old devices from
+earlier bot runs. They were deliberately **not** pruned for #15: none of them ever uploaded device
+keys (only the live device appears in `/keys/query`), so no client can see them as "unsigned
+devices" and they have no effect on the shield. `devices.sh prune rumi` would only remove the one
+never-seen device anyway; leave the others unless a separate cleanup is agreed.
+
+Done and verified 23 Sep 2026: Rumi's replies went from RED (unsigned device) to no shield, both via
+the js-sdk `getEncryptionInfoForEvent` check and in Element Web.
+
 ## Rate limits
 
 Synapse's rate limits live in `homeserver.yaml` under the `rc_*` keys (`rc_message`,
