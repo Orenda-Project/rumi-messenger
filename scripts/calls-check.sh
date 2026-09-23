@@ -107,13 +107,15 @@ GROUP_CALLS_OK=0; [[ "${GROUP_CALLS_FLAG}" == "True" ]] && GROUP_CALLS_OK=1
 check "Element config.json features.feature_group_calls == true" "${GROUP_CALLS_OK}" "got '${GROUP_CALLS_FLAG}'"
 
 # ---------------------------------------------------------------------------
-# 5. .well-known/matrix/client carries org.matrix.msc4143.rtc_foci -- ONLY served by Caddy
-#    (the "prod"/"tls" profile), since our pinned Synapse 1.161.0 does not serve MSC4143
-#    natively (verified live: /versions reports "org.matrix.msc4143": false). Checked against
-#    https://PUBLIC_DOMAIN, so this FAILs honestly (curl connection refused/timeout) when the
-#    "prod"/"tls" profile is not also up -- that is the real, documented state, not a skip.
+# 5. .well-known/matrix/client carries org.matrix.msc4143.rtc_foci -- served by Caddy (the
+#    "prod"/"tls" profile). Element Web reads this; Element X reads Synapse's own MSC4143
+#    /rtc/transports (check 7, on since round 2 via experimental_features.msc4143_enabled).
+#    Checked against https://PUBLIC_DOMAIN, so this FAILs honestly when "prod" is not up.
 # ---------------------------------------------------------------------------
-WK_JSON="$(curl -fsSk "https://${PUBLIC_DOMAIN}/.well-known/matrix/client" 2>/dev/null || true)"
+# CALLS_CHECK_RESOLVE=<domain>:443:127.0.0.1 lets a local test domain with no DNS be checked
+# (same trick as Chromium's --host-resolver-rules in docs/CALLING.md).
+RESOLVE_ARGS=(); [[ -n "${CALLS_CHECK_RESOLVE:-}" ]] && RESOLVE_ARGS=(--resolve "${CALLS_CHECK_RESOLVE}")
+WK_JSON="$(curl -fsSk "${RESOLVE_ARGS[@]}" "https://${PUBLIC_DOMAIN}/.well-known/matrix/client" 2>/dev/null || true)"
 RTC_FOCI_TYPE="$(python3 -c "
 import json,sys
 try:
@@ -126,6 +128,80 @@ print(foci[0].get('type','') if foci else '')
 RTC_FOCI_OK=0; [[ "${RTC_FOCI_TYPE}" == "livekit" ]] && RTC_FOCI_OK=1
 check "https://${PUBLIC_DOMAIN}/.well-known/matrix/client advertises org.matrix.msc4143.rtc_foci (needs the \"prod\"/\"tls\" profile up)" "${RTC_FOCI_OK}" \
   "no livekit rtc_foci entry found -- is 'docker compose --profile prod up -d caddy' running?"
+
+# ---------------------------------------------------------------------------
+# 6-8. What CLIENTS are told must be publicly reachable (round 2, Android OPEN_ID_ERROR): a phone
+#      cannot resolve the Docker-internal names "lk-jwt-service"/"livekit", so neither Synapse's
+#      MSC4143 transports reply, nor the .well-known rtc_foci entry, nor the wss:// URL
+#      lk-jwt-service hands out in every /sfu/get reply may contain them.
+# ---------------------------------------------------------------------------
+SYNAPSE_URL="http://${BIND_ADDR}:${SYNAPSE_PORT:-8008}"
+is_public_url() {  # prints 1 if $1 is a non-empty http(s)/ws(s) URL with no docker-internal host
+  python3 -c "
+import sys, urllib.parse
+u = sys.argv[1]
+h = (urllib.parse.urlsplit(u).hostname or '') if u else ''
+internal = {'lk-jwt-service', 'livekit', 'synapse', 'caddy', 'element', ''}
+print(1 if u and h not in internal and not h.startswith('rumi-') else 0)
+" "$1" 2>/dev/null
+}
+ADMIN_TOKEN="$(curl -s -X POST "${SYNAPSE_URL}/_matrix/client/v3/login" -H 'Content-Type: application/json' \
+  -d "{\"type\":\"m.login.password\",\"identifier\":{\"type\":\"m.id.user\",\"user\":\"${ADMIN_USER:-admin}\"},\"password\":\"${ADMIN_PASSWORD:-}\"}" 2>/dev/null \
+  | python3 -c 'import json,sys;print(json.load(sys.stdin).get("access_token",""))' 2>/dev/null)"
+TRANSPORTS_JSON=""
+if [[ -n "${ADMIN_TOKEN}" ]]; then
+  TRANSPORTS_JSON="$(curl -s -H "Authorization: Bearer ${ADMIN_TOKEN}" \
+    "${SYNAPSE_URL}/_matrix/client/unstable/org.matrix.msc4143/rtc/transports" 2>/dev/null || true)"
+  # Log the check's own session out again so repeated runs don't pile up admin devices.
+  curl -s -o /dev/null -X POST -H "Authorization: Bearer ${ADMIN_TOKEN}" "${SYNAPSE_URL}/_matrix/client/v3/logout" 2>/dev/null || true
+fi
+TRANSPORT_URL="$(python3 -c "
+import json,sys
+try:
+    d=json.loads(sys.argv[1])
+except Exception:
+    d={}
+t=[x for x in d.get('rtc_transports',[]) if x.get('type')=='livekit']
+print(t[0].get('livekit_service_url','') if t else '')
+" "${TRANSPORTS_JSON}" 2>/dev/null)"
+check "Synapse MSC4143 /rtc/transports gives clients a PUBLIC livekit_service_url" "$(is_public_url "${TRANSPORT_URL}")" \
+  "got '${TRANSPORT_URL:-<none>}' (raw: ${TRANSPORTS_JSON:0:160}) -- re-run scripts/setup.sh; never lk-jwt-service:8080"
+
+WK_URL="$(python3 -c "
+import json,sys
+try:
+    d=json.loads(sys.argv[1])
+except Exception:
+    d={}
+f=d.get('org.matrix.msc4143.rtc_foci',[])
+print(f[0].get('livekit_service_url','') if f else '')
+" "${WK_JSON}" 2>/dev/null)"
+check ".well-known rtc_foci livekit_service_url is PUBLIC" "$(is_public_url "${WK_URL}")" "got '${WK_URL:-<none>}'"
+
+JWT_CONTAINER="${RUMI_CONTAINER_PREFIX}-lk-jwt-service"
+WS_URL="$(docker inspect -f '{{range .Config.Env}}{{println .}}{{end}}' "${JWT_CONTAINER}" 2>/dev/null | sed -n 's/^LIVEKIT_URL=//p')"
+check "lk-jwt-service hands clients a PUBLIC LiveKit wss:// URL" "$(is_public_url "${WS_URL}")" "got '${WS_URL:-<none>}'"
+
+# ---------------------------------------------------------------------------
+# 9. Members may JOIN a call: new rooms get org.matrix.msc3401.call.member at power level 0.
+#    Without it a non-admin teacher's join is 403'd and Element Call drops them ("Connection
+#    lost") -- the root cause of round 1's second-participant abort.
+# ---------------------------------------------------------------------------
+PL_MEMBER="$(docker exec "${RUMI_CONTAINER_PREFIX}-synapse" python3 -c "
+import yaml
+c=yaml.safe_load(open('/data/homeserver.yaml'))
+print(c.get('default_power_level_content_override',{}).get('private_chat',{}).get('events',{}).get('org.matrix.msc3401.call.member','unset'))
+" 2>/dev/null)"
+PL_OK=0; [[ "${PL_MEMBER}" == "0" ]] && PL_OK=1
+check "new rooms let members join calls (call.member power level 0)" "${PL_OK}" "got '${PL_MEMBER:-unreadable}' -- re-run scripts/setup.sh"
+
+# ---------------------------------------------------------------------------
+# 10. Delayed events (MSC4140) on, so a crashed phone's call membership expires instead of
+#     leaving a "Waiting for media..." ghost tile for hours.
+# ---------------------------------------------------------------------------
+DELAYED="$(curl -s "${SYNAPSE_URL}/_matrix/client/versions" 2>/dev/null | python3 -c 'import json,sys;print(json.load(sys.stdin).get("unstable_features",{}).get("org.matrix.msc4140"))' 2>/dev/null)"
+DELAYED_OK=0; [[ "${DELAYED}" == "True" ]] && DELAYED_OK=1
+check "Synapse advertises delayed events (org.matrix.msc4140)" "${DELAYED_OK}" "got '${DELAYED}'"
 
 echo
 echo "================================================================"

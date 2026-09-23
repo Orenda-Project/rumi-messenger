@@ -428,10 +428,20 @@ docker compose --profile calls --profile prod up -d livekit lk-jwt-service caddy
 scripts/calls-check.sh
 ```
 
-`calls` alone starts the LiveKit SFU + lk-jwt-service; a client can only *discover* them once
-`prod`/`tls` is also up (the MatrixRTC backend is advertised via Caddy's
-`.well-known/matrix/client`, since our pinned Synapse does not serve MSC4143 natively). Same
-"needs a real domain" dependency issue #2 itself names against issue #6.
+`calls` starts the LiveKit SFU + lk-jwt-service; `prod` (Caddy) serves them to clients at
+`https://PUBLIC_DOMAIN/livekit/jwt` and `wss://PUBLIC_DOMAIN/livekit/sfu`. Synapse advertises the
+same public URL on its own MSC4143 `/rtc/transports` (Element X) and Caddy's `.well-known`
+(Element Web). Never point clients at `lk-jwt-service:8080` -- phones cannot resolve it
+(OPEN_ID_ERROR); `calls-check.sh` fails if anything does.
+
+Proven 2026-09-23 on an isolated `rumi.calls.test` stack: 3 teachers in one call, every tile
+visible to every participant, plus a screen share (`docs/CALLING.md`, "Round-2 call proof").
+For phones on other networks also set `LIVEKIT_MEDIA_BIND_ADDR=0.0.0.0` and
+`LIVEKIT_NODE_IP=<server IP>` and open the LiveKit media ports (table below). That path is not
+proven yet: do one real two-phone call on the real domain before announcing calls to staff.
+
+Rooms created before 2026-09-23 keep the "join call" permission at Moderator (50), so only the
+room creator can join a call there. Lower it per room (`docs/CALLING.md`, root-cause section).
 
 ## Registration modes
 
@@ -630,10 +640,9 @@ domain/server, and can't be faked from this machine:
   teachers.
 - Deciding and setting real media retention (see "Media retention" above) and a disk-size budget
   once real upload volume exists.
-- Group calls (issue #2): the `calls` profile itself is proven (backend chain verified end to end,
-  one real browser participant streams real media into a LiveKit room) -- but a second real
-  participant's connection was NOT proven in the automated run (see `docs/CALLING.md`'s "Known
-  gaps" #6). Do a real two-person manual test before relying on this for a staff meeting.
+- Group calls (issue #2): 3 participants + screen share proven on one machine (isolated
+  `rumi.calls.test` stack, headless browsers). Participants on other networks/phones are NOT
+  proven yet: set `LIVEKIT_MEDIA_BIND_ADDR`/`LIVEKIT_NODE_IP` and do a real two-phone call first.
 
 ### DNS records to create
 
@@ -654,6 +663,8 @@ everything), you only need the one record.
 | 8448 | TCP | -- | Only if federation is ever turned on (currently OFF, issue #8) -- not needed for this deployment shape |
 | `TURN_PORT` (3478 default) | TCP + UDP | coturn | STUN/TURN signalling |
 | `TURN_MIN_PORT`-`TURN_MAX_PORT` (49152-65535 default) | **UDP only** | coturn | Relayed call media -- see "Calls" section above for why this must be UDP, not just the signalling port |
+| `LIVEKIT_RTC_TCP_PORT` (7881 default) | TCP | LiveKit | Group-call media fallback; only with the `calls` profile + `LIVEKIT_MEDIA_BIND_ADDR=0.0.0.0` |
+| `LIVEKIT_RTC_UDP_MIN`-`LIVEKIT_RTC_UDP_MAX` (50100-50200 default) | UDP | LiveKit | Group-call media; signalling goes through Caddy on 443 |
 
 Do **not** open Synapse's `SYNAPSE_PORT`, Element's `ELEMENT_PORT`, or Postgres's `5432` directly
 -- they should never be reachable except through Caddy / the Docker-internal network. Run

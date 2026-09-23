@@ -26,46 +26,98 @@ it itself. That's what this deployment uses. See `docs/DECISIONS.tsv`.
 ## Architecture
 
 ```
-Element Web (embedded Element Call widget)
-   |  1. GET https://{PUBLIC_DOMAIN}/.well-known/matrix/client
-   |     -> org.matrix.msc4143.rtc_foci: [{type: livekit, livekit_service_url: https://{PUBLIC_DOMAIN}/livekit/jwt}]
-   |  2. POST .../livekit/jwt/sfu/get  (Bearer: OpenID token from Synapse)      -- via Caddy, prefix stripped
+Element Web / Element X (phone)
+   |  1. discover the calls backend -- BOTH paths hand out the same PUBLIC URL (LIVEKIT_SERVICE_URL,
+   |     default https://{PUBLIC_DOMAIN}/livekit/jwt):
+   |       - Synapse  GET /_matrix/client/unstable/org.matrix.msc4143/rtc/transports  (Element X reads this)
+   |       - Caddy    GET /.well-known/matrix/client -> org.matrix.msc4143.rtc_foci  (Element Web reads this)
+   |  2. POST https://{PUBLIC_DOMAIN}/livekit/jwt/sfu/get  (OpenID token from Synapse)  -- Caddy, prefix stripped
    v
-lk-jwt-service  -- verifies the OpenID token via GET https://{PUBLIC_DOMAIN}/_matrix/federation/v1/openid/userinfo
-   |               (also via Caddy -- see "Known gaps" below for why this needs the federation
-   |               RESOURCE mounted even though federation_domain_whitelist stays empty)
-   |  mints a signed LiveKit JWT
+lk-jwt-service -- verifies the OpenID token via GET https://{PUBLIC_DOMAIN}/_matrix/federation/v1/openid/userinfo
+   |              (Synapse's stand-alone `openid` resource; the rest of federation stays unserved, issue #8)
+   |  replies {url: wss://{PUBLIC_DOMAIN}/livekit/sfu, jwt}   (LIVEKIT_WS_URL -- also public)
    v
-LiveKit SFU  <---- ws://{PUBLIC_DOMAIN}:{LIVEKIT_PORT} (browser connects directly for the actual
-                    call media -- plaintext ws://, not wss://; see "Known gaps")
+LiveKit SFU <-- signalling: wss://{PUBLIC_DOMAIN}/livekit/sfu (Caddy, real TLS)
+            <-- media: UDP LIVEKIT_RTC_UDP_MIN-MAX / TCP LIVEKIT_RTC_TCP_PORT, DIRECT to the server
+                (LIVEKIT_MEDIA_BIND_ADDR + LIVEKIT_NODE_IP, see "Production" below)
 ```
 
+Docker-internal names (`lk-jwt-service:8080`, `livekit:7880`, `synapse:8008`) are used only for
+server-to-server hops (Caddy's upstreams, LiveKit's webhook). **A client must never be handed
+one**: a phone cannot resolve them. That is exactly what the Android run hit -- the dev stack's
+hand-edited Synapse config advertised `http://lk-jwt-service:8080`, and Element X showed
+OPEN_ID_ERROR in the call lobby. `scripts/calls-check.sh` now fails on that value (checks 7-9).
+
 Compose services: `livekit` (the SFU) and `lk-jwt-service` (the auth bridge), both behind the
-`calls` profile. Config is rendered by `scripts/setup.sh` into `deploy/livekit/livekit.yaml`
-(gitignored, same pattern as coturn's `turnserver.conf`).
+`calls` profile. `scripts/setup.sh` renders `deploy/livekit/livekit.yaml` (gitignored) and patches
+Synapse's `homeserver.yaml` with:
 
-## Why our pinned Synapse can't serve MSC4143 itself
+| Setting | Why |
+|---|---|
+| `experimental_features.msc4143_enabled: true` + `matrix_rtc.transports` | Synapse v1.161.0 DOES serve MSC4143 `/rtc/transports` once the flag is on (round 1 said it could not; it had tested without the flag). Element X discovers the SFU here. |
+| `default_power_level_content_override` (all presets): `org.matrix.msc3401.call.member: 0` | Joining a call sends a `call.member` STATE event; the default `state_default: 50` makes that 403 for an ordinary teacher. Root cause of round 1's second-participant abort (below). Same value Element Web uses when it creates a room itself. |
+| `max_event_delay_duration: 24h` (MSC4140 delayed events) | Element Call schedules a server-side "leave" it keeps refreshing; if a phone dies, Synapse sends it. Without this a dead client stays as a "Waiting for media..." ghost tile for hours. |
 
-Synapse's own native `matrix_rtc.transports` config key (which would let Synapse serve the
-`/rtc/transports` discovery endpoint directly, no well-known needed) does **not** work on our
-pinned v1.161.0 -- verified live: `GET /_matrix/client/versions` reports
-`"org.matrix.msc4143": false`, and no such REST module exists in the image
-(`ModuleNotFoundError: No module named 'synapse.rest.client.rtc_transports'`). The config key is
-harmlessly patched into `homeserver.yaml` anyway (forward-compatible for whenever a future Synapse
-release does support it), but the actual discovery path today is Caddy's `.well-known/matrix/client`
-response -- which means **a client can only discover the calls backend when the `prod`/`tls`
-profile is also running.** `docker compose --profile calls up -d` alone starts LiveKit and
-lk-jwt-service but leaves them undiscoverable.
+## Why the second participant was dropped in round 1 (root cause, reproduced + fixed in round 2)
+
+Not the certificate, not `--host-resolver-rules`, not LiveKit's ICE/port setup. The browser log
+of the second participant, in order:
+
+1. `connected to Livekit Server ... participant: @+923001110002...` -- the websocket DID connect.
+2. `M_FORBIDDEN: [403] You don't have permission to post that to the room. user_level (0) <
+   send_level (50) (.../state/org.matrix.msc3401.call.member/...)`
+3. `MembershipManager encountered an unrecoverable error` -> `Connection lost` ->
+   `Abort connection attempt due to user initiated disconnect` / `Client initiated disconnect`.
+
+The room was created through the client-server API (round 1 and round 2 both did this; so do the
+bot, admin scripts and Element X), which gets Synapse's default power levels: every state event
+at 50. The creator is 100, so participant A could always join; every other teacher got 403, and
+Element Call itself tore down the LiveKit connection -- the "user initiated disconnect" was the
+app, not the user. Proof it is causal: same stack, same browsers, a room created after the
+power-level override joins all participants (evidence below); the room created before it still
+drops the second participant.
+
+**Rooms created before this change keep `call.member` at 50.** Fix one in Element Web: Room
+settings -> Roles & Permissions -> the "Join Element Call calls" permission (label may vary
+by Element version) -> Default. Or as the
+room's admin via the API: `PUT /_matrix/client/v3/rooms/<room>/state/m.room.power_levels/` with
+`events["org.matrix.msc3401.call.member"] = 0` added to the current content.
 
 ## Bringing it up
 
 ```bash
-scripts/setup.sh                                    # renders deploy/livekit/livekit.yaml
+scripts/setup.sh                                    # renders livekit.yaml, patches homeserver.yaml
 docker compose --profile calls --profile prod up -d livekit lk-jwt-service caddy
-# CADDY_TLS_MODE=internal in deploy/.env for a local self-signed proof (no public DNS needed);
-# leave blank for a real domain (Let's Encrypt, same as issue #6's production hardening).
-scripts/calls-check.sh                              # falsifiable health check, see below
+scripts/calls-check.sh                              # 11 falsifiable checks, see "Verifying"
 ```
+
+`CADDY_TLS_MODE=internal` in `deploy/.env` gives a local self-signed proof (no public DNS); leave
+it blank for a real domain (Let's Encrypt, issue #6). With a self-signed cert lk-jwt-service also
+needs `LIVEKIT_INSECURE_SKIP_VERIFY_TLS=YES_I_KNOW_WHAT_I_AM_DOING` (local proofs only).
+
+### Production (reaching phones on other networks)
+
+| `deploy/.env` | Value | Why |
+|---|---|---|
+| `LIVEKIT_SERVICE_URL`, `LIVEKIT_WS_URL` | leave blank | default to `https://PUBLIC_DOMAIN/livekit/jwt` and `wss://PUBLIC_DOMAIN/livekit/sfu`, both through Caddy |
+| `LIVEKIT_MEDIA_BIND_ADDR` | `0.0.0.0` | media ports must be reachable directly, not only on 127.0.0.1 |
+| `LIVEKIT_NODE_IP` | the server's public (or LAN) IP | otherwise LiveKit advertises its Docker bridge IP, which only the server itself can reach |
+| firewall | open `LIVEKIT_RTC_TCP_PORT`/tcp and `LIVEKIT_RTC_UDP_MIN-MAX`/udp | call media |
+
+**Not proven:** all round-2 participants ran on the server machine itself, so the node IP and
+firewall path to a phone on another network is untested. The first real-domain deployment must
+run a two-phone call before announcing calls to staff.
+
+### Dev stack (`SERVER_NAME=localhost`)
+
+`setup.sh` still works: it advertises `https://localhost/livekit/jwt` and warns that this is
+reachable from this machine only. Calls on the dev stack additionally need `prod` up
+(`CADDY_TLS_MODE=internal`) and still hit the "localhost" gotcha below, so use a separate
+`SERVER_NAME=rumi.calls.test` stack for a real call test (the round-2 recipe, see "Verifying").
+The live dev stack predates this change: its homeserver.yaml was hand-edited to
+`http://lk-jwt-service:8080` and has no power-level override or delayed events. Re-run
+`scripts/setup.sh` on it (restarts Synapse, Element, coturn) to pick them up.
+
 
 ## Local testing gotcha: SERVER_NAME must NOT be the literal string "localhost"
 
@@ -97,82 +149,67 @@ A real production deployment never hits this at all -- a real domain is not lite
 "localhost" in the first place. This is a local-testing-only wrinkle, documented honestly rather
 than worked around with something fragile.
 
-## Known gaps (stated plainly, not silently omitted)
+## Known gaps (stated plainly)
 
-1. **Federation resource must be mounted for `/openid/userinfo`, even with federation off (issue
-   #8).** lk-jwt-service's OpenID verification call always goes to
-   `GET /_matrix/federation/v1/openid/userinfo`, which Synapse only serves when `federation` is in
-   a listener's `resources`. Issue #8 removed that resource entirely. The fix that keeps issue
-   #8's actual goal intact: `federation_domain_whitelist: []` (already set) independently blocks
-   all real inter-server federation traffic (transactions, backfill, invites) regardless of
-   whether the resource is mounted -- verified live, `GET /_matrix/federation/v1/version` and
-   `GET .../openid/userinfo` both need to be reachable for calls to work at all, and turning the
-   resource back on does not reopen actual federation as long as the whitelist stays empty. **This
-   repo's default dev stack currently does NOT have the federation resource re-enabled** (that's a
-   coordinated change touching issue #8's own territory, left for explicit follow-up rather than
-   changed unilaterally here -- see `docs/DECISIONS.tsv`). Until it is, group calls cannot
-   actually authorize on this deployment even with `calls`+`prod` up.
-2. **Plaintext `ws://` to the SFU, not `wss://`.** The browser connects directly to LiveKit's own
-   port for call media, not through Caddy. This only works at all because browsers exempt
-   `localhost`/`127.0.0.1`-resolving origins from the "https page can't open ws://" mixed-content
-   rule. A real school domain is not exempt -- production needs Caddy (or another TLS-terminating
-   proxy) stream-proxying LiveKit's WebSocket port to `wss://`, which is new work, not yet built.
-3. **UDP media port range is small (50100-50200, 100 ports) and bridge-published, not
-   host-networked**, matching `element-hq/element-call`'s own dev-compose rather than LiveKit's
-   own "use host networking for wide UDP ranges" recommendation (which is coturn's shape in this
-   repo, at ~16k ports). 100 ports is enough for a handful of concurrent participants per
-   call-leg-pair on a single small school deployment, not "one media server handles a few hundred
-   concurrent participants" from issue #2's own capacity ask -- that needs raising
-   `LIVEKIT_RTC_UDP_MIN`/`MAX` in `deploy/.env` (each participant's media leg claims roughly one
-   port) plus enough host resources, and is untested past 2 real browser participants (see the
-   Proven/Not proven table below).
-4. **`use_external_ip: false`** in the rendered `livekit.yaml` -- same NAT-traversal gap
-   coturn's `TURN_EXTERNAL_IP` already documents for 1:1 calls. A deployment behind NAT needs this
-   flipped, tracked alongside issue #6.
-5. **No screen-share-specific proof beyond what's in the table below.** Screen sharing in Element
-   Call is the same LiveKit publish path as camera video (a second track), so nothing
-   screen-share-specific was added to the compose/config -- but only what was actually exercised
-   with a real screen-share click is claimed as proven.
-6. **A second real-browser participant's LiveKit WebSocket handshake failed in the automated
-   headless run.** Reproduced twice: participant A (headless Chromium, fake camera) authorizes,
-   loads the Element Call widget, and connects to the LiveKit room successfully (confirmed via
-   `[CallViewModel] matrixLivekitMembers$ updated` / a real video tile on screen). Participant B
-   (a genuinely SEPARATE Chromium process, not just a second browser context -- the first attempt
-   with two contexts in one process looked like fake-media-device contention, so this rules that
-   out) gets the same room, a correctly minted widget URL with `intent=join_existing`, loads the
-   widget, but then logs `Abort connection attempt due to user initiated disconnect` /
-   `ConnectionError: Client initiated disconnect` before the LiveKit WebSocket finishes
-   connecting. Not chased further given the local-testing environment differences already at play
-   (self-signed cert, `--host-resolver-rules` hostname mapping, two full Chromium processes on one
-   test machine); genuinely unresolved, not silently worked around. **A real two-person manual
-   test (two actual people, two actual devices/browsers, against a `prod`+`calls` deployment) is
-   the next real verification step**, not a re-run of this specific headless script.
+1. **Cross-network media untested.** See "Production" above: `LIVEKIT_NODE_IP` and the firewall
+   path are wired up but no participant has joined from a second machine or a phone yet.
+2. **Element X (Android) not re-tested after the fix.** The server now advertises the public URL
+   (calls-check check 7), but the phone run that saw OPEN_ID_ERROR has not been repeated.
+3. **UDP media range is small (100 ports by default).** Enough for a staff meeting on one small
+   deployment; raise `LIVEKIT_RTC_UDP_MIN`/`MAX` for more concurrent participants.
+4. **Pre-existing rooms** keep `call.member` at 50 until an admin lowers it (above).
+5. **Headless screen share uses Chromium's fake capture source**, so the shared "screen" is a
+   green test pattern with its own clock, not a real desktop. The SFU logged it as
+   `source: SCREEN_SHARE` 1920x1080 and the other two participants rendered it in the spotlight
+   (evidence below). A real desktop share is the same LiveKit publish path; a manual check with a
+   real screen is still worth doing once.
+6. **One transient reconnect** is logged per join (`livekitRoom.connect FAILED ... Client initiated
+   disconnect`, then `connected to Livekit Server` within a second): Element Call switches from its
+   initial transport to the room's active one. Harmless, not a failure.
+
 
 ## Capacity story (issue #2 asked for this explicitly)
 
-One LiveKit SFU instance, sized like this deployment's, handles on the order of tens to a
-few hundred concurrent participants depending on host CPU/network (LiveKit's own documented
-guidance) -- **not proven by this work**, only the underlying mechanism (2 real browser
-participants) was. Scaling further is horizontal: more LiveKit nodes behind a shared Redis-backed
-room directory (LiveKit's own multi-node deployment mode), which this deployment does not run
-(single node, no Redis) -- a real "few hundred participants" school-wide capacity claim needs that
-work plus a real load test, neither of which happened here. State this honestly to Kamal rather
-than repeating the vendor number as if it were locally verified.
+Proven here: **3 participants** in one call on one LiveKit node, all video tiles playing, plus a
+screen share. One LiveKit node of this size handles tens to a few hundred participants
+depending on host CPU/bandwidth (LiveKit's own guidance) -- **not load-tested here**. Scaling
+further is horizontal: more LiveKit nodes behind a shared Redis (LiveKit multi-node mode), which
+this deployment does not run. Do not tell a school "a few hundred" until a real load test.
 
 ## Verifying
 
 ```bash
 scripts/calls-check.sh
+# local test domain with no DNS:
+CALLS_CHECK_RESOLVE=rumi.calls.test:443:127.0.0.1 scripts/calls-check.sh
 ```
 
-Checks (falsifiable -- every one fails cleanly, not silently, with the `calls`/`prod` profiles
-down): livekit + lk-jwt-service containers running, LiveKit SFU answers on its port,
-lk-jwt-service answers `/healthz` (note: singular `/health` 404s -- not a real route on this
-image, verified live), Element `config.json` carries `feature_group_calls`, and
-`https://{PUBLIC_DOMAIN}/.well-known/matrix/client` advertises `org.matrix.msc4143.rtc_foci`.
+11 checks, each FAILs rather than skips: livekit + lk-jwt-service running, SFU and `/healthz`
+answer, Element `feature_group_calls`, `.well-known` advertises `rtc_foci`, **Synapse
+`/rtc/transports` URL is public, `.well-known` URL is public, lk-jwt-service's client wss:// URL
+is public** (no `lk-jwt-service`/`livekit`/`synapse`/`caddy`/`element` hostnames), new rooms put
+`call.member` at 0, and Synapse advertises delayed events (`org.matrix.msc4140`). Falsified live:
+against the dev stack (hand-edited `http://lk-jwt-service:8080`, calls profile down) it reports
+1 passed, 10 failed, naming the internal URL.
 
-None of these checks place an actual call -- see the Proven/Not-proven table in the issue #2
-delivery comment for what a real 2-browser Playwright run did and did not prove.
+### Round-2 call proof (2026-09-23)
+
+Isolated stack (`COMPOSE_PROJECT_NAME=rumicallsverify`, `SERVER_NAME=rumi.calls.test`, own ports,
+coturn not started so the dev stack's coturn is untouched), `calls` + `prod` with
+`CADDY_TLS_MODE=internal`. Separate headless Chromium processes (`--use-fake-device-for-media-stream
+--use-fake-ui-for-media-stream --ignore-certificate-errors --host-resolver-rules="MAP
+rumi.calls.test 127.0.0.1" --auto-select-desktop-capture-source="Entire screen"`), one per
+throwaway teacher from `scripts/teacher.sh`, all in one room. Evidence in the personal-agent-v2
+vault, `projects/rumi-messenger/evidence-2026-09-23/calls-round2/`.
+
+| Item | Result |
+|---|---|
+| Round-1 abort reproduced in a room with default power levels | second participant 403 on `call.member` -> "Connection lost" |
+| 2 participants, both tiles visible in both browsers | PROVEN (each browser: 2 playing 1280x720 videos) |
+| 3 participants, all tiles in all three browsers | PROVEN (0 ghost tiles) |
+| Screen share seen by the other participants | PROVEN (SFU `source: SCREEN_SHARE`; spotlight tile in both viewers) |
+| Dead clients' memberships expire (delayed events) | PROVEN (rerun in the same room after browsers were killed: 0 ghosts) |
+
 
 ## Operational gotcha found while verifying: don't run a second stack's coturn alongside this one
 

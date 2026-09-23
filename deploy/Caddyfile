@@ -27,13 +27,14 @@
 	handle /.well-known/matrix/client {
 		header Content-Type application/json
 		header Access-Control-Allow-Origin *
-		# org.matrix.msc4143.rtc_foci (issue #2, group calls): this is the ONLY place a client can
-		# discover the LiveKit/lk-jwt-service backend rendered by scripts/setup.sh -- our pinned
-		# Synapse 1.161.0 does not serve MSC4143 natively (verified live: /versions reports
-		# "org.matrix.msc4143": false). livekit_service_url points at this same Caddy instance's
+		# org.matrix.msc4143.rtc_foci (issue #2, group calls): how Element Web discovers the
+		# LiveKit/lk-jwt-service backend (Element X uses Synapse's own MSC4143 /rtc/transports,
+		# which scripts/setup.sh turns on). livekit_service_url points at this same Caddy instance's
 		# own /livekit/jwt path (handled below), not lk-jwt-service directly, so it always shares
-		# PUBLIC_DOMAIN's TLS cert -- see docs/CALLING.md.
-		respond `{"m.homeserver": {"base_url": "https://{$PUBLIC_DOMAIN}"}, "m.identity_server": {"base_url": "https://vector.im"}, "org.matrix.msc4143.rtc_foci": [{"type": "livekit", "livekit_service_url": "https://{$PUBLIC_DOMAIN}/livekit/jwt"}]}` 200
+		# PUBLIC_DOMAIN's TLS cert -- see docs/CALLING.md. LIVEKIT_SERVICE_URL comes from
+		# docker-compose.yml (default https://{$PUBLIC_DOMAIN}/livekit/jwt), the same value
+		# scripts/setup.sh writes into Synapse's matrix_rtc.transports, so both discovery paths agree.
+		respond `{"m.homeserver": {"base_url": "https://{$PUBLIC_DOMAIN}"}, "m.identity_server": {"base_url": "https://vector.im"}, "org.matrix.msc4143.rtc_foci": [{"type": "livekit", "livekit_service_url": "{$LIVEKIT_SERVICE_URL}"}]}` 200
 	}
 
 	# Group calls (issue #2): proxies to lk-jwt-service, prefix stripped (lk-jwt-service's own

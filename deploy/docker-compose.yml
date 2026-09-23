@@ -186,10 +186,9 @@ services:
   # per MSC4195. Behind the "calls" compose profile, same off-by-default posture as
   # "push"/"tls"/"prod" -- `docker compose --profile calls up -d` opts in on its own; combine
   # with `--profile prod` (or `tls`) for a client to actually be able to DISCOVER these services
-  # (see the Caddyfile's org.matrix.msc4143.rtc_foci well-known entry and docs/CALLING.md) --
-  # our pinned Synapse 1.161.0 does not serve MSC4143 natively (verified live: `/versions`
-  # reports `"org.matrix.msc4143": false`, no such REST module exists in the image), so
-  # well-known via Caddy is the only discovery path this stack has. Config is rendered by
+  # (Caddy serves the public /livekit/jwt + /livekit/sfu routes; discovery is Caddy's
+  # .well-known rtc_foci for Element Web and Synapse's MSC4143 /rtc/transports for Element X,
+  # both the same public URL -- see docs/CALLING.md). Config is rendered by
   # scripts/setup.sh into deploy/livekit/livekit.yaml (gitignored), same pattern as coturn's
   # turnserver.conf.
   livekit:
@@ -213,8 +212,11 @@ services:
       # a large multi-hundred-participant production deployment would need, see docs/CALLING.md
       # for the capacity story issue #2 asked for.
       - "${BIND_ADDR:-127.0.0.1}:${LIVEKIT_PORT:-7880}:7880"
-      - "${BIND_ADDR:-127.0.0.1}:${LIVEKIT_RTC_TCP_PORT:-7881}:7881"
-      - "${BIND_ADDR:-127.0.0.1}:${LIVEKIT_RTC_UDP_MIN:-50100}-${LIVEKIT_RTC_UDP_MAX:-50200}:${LIVEKIT_RTC_UDP_MIN:-50100}-${LIVEKIT_RTC_UDP_MAX:-50200}/udp"
+      # Media ports (TCP fallback + UDP range) bind LIVEKIT_MEDIA_BIND_ADDR, not BIND_ADDR: phones
+      # must reach these DIRECTLY (not via Caddy). Production sets LIVEKIT_MEDIA_BIND_ADDR=0.0.0.0
+      # plus LIVEKIT_NODE_IP=<server IP>; the default keeps them local-only like everything else.
+      - "${LIVEKIT_MEDIA_BIND_ADDR:-${BIND_ADDR:-127.0.0.1}}:${LIVEKIT_RTC_TCP_PORT:-7881}:7881"
+      - "${LIVEKIT_MEDIA_BIND_ADDR:-${BIND_ADDR:-127.0.0.1}}:${LIVEKIT_RTC_UDP_MIN:-50100}-${LIVEKIT_RTC_UDP_MAX:-50200}:${LIVEKIT_RTC_UDP_MIN:-50100}-${LIVEKIT_RTC_UDP_MAX:-50200}/udp"
     healthcheck:
       # LiveKit answers a plain 200 OK on / with no auth needed (its own documented healthcheck).
       # Checked against the container's OWN internal port (always 7880, set by livekit.yaml's
@@ -259,7 +261,9 @@ services:
       # docs/CALLING.md) -- verified live, pointing this at the host-mapped LIVEKIT_PORT instead
       # produced "tcp connect error: Connection refused" from inside this container. Needs the
       # `prod`/`tls` profile up, same as the well-known discovery path.
-      LIVEKIT_URL: "wss://${PUBLIC_DOMAIN:-localhost}/livekit/sfu"
+      # Public wss:// URL handed to CLIENTS in every /sfu/get reply (and also used by this service
+      # for its own room-management calls, through Caddy). Override with LIVEKIT_WS_URL in .env.
+      LIVEKIT_URL: "${LIVEKIT_WS_URL:-wss://${PUBLIC_DOMAIN:-localhost}/livekit/sfu}"
       LIVEKIT_KEY: "${LIVEKIT_API_KEY}"
       LIVEKIT_SECRET: "${LIVEKIT_API_SECRET}"
       LIVEKIT_JWT_BIND: ":8080"
@@ -320,6 +324,7 @@ services:
       PUBLIC_DOMAIN: ${PUBLIC_DOMAIN}
       ELEMENT_DOMAIN: ${ELEMENT_DOMAIN}
       CADDY_TLS_MODE: ${CADDY_TLS_MODE:-}
+      LIVEKIT_SERVICE_URL: "${LIVEKIT_SERVICE_URL:-https://${PUBLIC_DOMAIN:-localhost}/livekit/jwt}"
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
       - rumi-caddy-data:/data

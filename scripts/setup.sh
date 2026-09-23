@@ -41,7 +41,7 @@ fill_env_var() {
 # `SYNAPSE_PORT=8208 ELEMENT_PORT=8283 scripts/setup.sh`). These must win over both a freshly
 # copied .env.example AND an existing deploy/.env -- otherwise `source`-ing the file below would
 # silently clobber the caller's exported values back to whatever the file says.
-OVERRIDE_VARS=(SERVER_NAME PUBLIC_BASE_URL SYNAPSE_PORT ELEMENT_PORT BIND_ADDR REGISTRATION_MODE COMPOSE_PROJECT_NAME RUMI_CONTAINER_PREFIX TURN_PORT TURN_MIN_PORT TURN_MAX_PORT PUBLIC_DOMAIN ELEMENT_DOMAIN CADDY_TLS_MODE BACKUP_KEEP_N LIVEKIT_PORT LIVEKIT_RTC_TCP_PORT LIVEKIT_RTC_UDP_MIN LIVEKIT_RTC_UDP_MAX LIVEKIT_JWT_PORT)
+OVERRIDE_VARS=(SERVER_NAME PUBLIC_BASE_URL SYNAPSE_PORT ELEMENT_PORT BIND_ADDR REGISTRATION_MODE COMPOSE_PROJECT_NAME RUMI_CONTAINER_PREFIX TURN_PORT TURN_MIN_PORT TURN_MAX_PORT PUBLIC_DOMAIN ELEMENT_DOMAIN CADDY_TLS_MODE BACKUP_KEEP_N LIVEKIT_PORT LIVEKIT_RTC_TCP_PORT LIVEKIT_RTC_UDP_MIN LIVEKIT_RTC_UDP_MAX LIVEKIT_JWT_PORT LIVEKIT_SERVICE_URL LIVEKIT_NODE_IP)
 for _v in "${OVERRIDE_VARS[@]}"; do
   eval "PRESET_${_v}=\"\${${_v}:-}\""
 done
@@ -147,6 +147,21 @@ PUBLIC_DOMAIN="${PUBLIC_DOMAIN:-${SERVER_NAME}}"
 ELEMENT_DOMAIN="${ELEMENT_DOMAIN:-${PUBLIC_DOMAIN}}"
 CADDY_TLS_MODE="${CADDY_TLS_MODE:-}"
 BACKUP_KEEP_N="${BACKUP_KEEP_N:-14}"
+# Group calls (issue #2): the lk-jwt-service address CLIENTS are told to use (Synapse's
+# matrix_rtc.transports below + Caddy's .well-known rtc_foci). Must be publicly reachable -- a
+# phone cannot resolve the Docker-internal name "lk-jwt-service", which is exactly what the Android
+# test hit (OPEN_ID_ERROR in the call lobby). Default: Caddy's /livekit/jwt route on
+# PUBLIC_DOMAIN. Deliberately NOT written into deploy/.env, so changing PUBLIC_DOMAIN later keeps
+# it in step; set it in deploy/.env only to point somewhere else. Server-to-server traffic
+# (LiveKit's webhook to lk-jwt-service) keeps using the container name.
+LIVEKIT_SERVICE_URL="${LIVEKIT_SERVICE_URL:-https://${PUBLIC_DOMAIN}/livekit/jwt}"
+case "${LIVEKIT_SERVICE_URL}" in
+  *lk-jwt-service*|*://localhost*|*://127.*)
+    log "  WARNING: LIVEKIT_SERVICE_URL=${LIVEKIT_SERVICE_URL} is not reachable from a phone -- group calls only work from this machine (see docs/CALLING.md)" ;;
+esac
+# Optional: the IP LiveKit advertises in its ICE candidates. Blank = the container's own bridge
+# IP, which only this host can reach. A real deployment sets the server's LAN/public IP.
+LIVEKIT_NODE_IP="${LIVEKIT_NODE_IP:-}"
 fill_env_var PUBLIC_DOMAIN "${PUBLIC_DOMAIN}"
 fill_env_var ELEMENT_DOMAIN "${ELEMENT_DOMAIN}"
 fill_env_var CADDY_TLS_MODE "${CADDY_TLS_MODE}"
@@ -185,6 +200,7 @@ dc run --rm \
   -e TURN_HOST="${TURN_HOST}" \
   -e TURN_PORT="${TURN_PORT}" \
   -e TURN_SHARED_SECRET="${TURN_SHARED_SECRET}" \
+  -e LIVEKIT_SERVICE_URL="${LIVEKIT_SERVICE_URL}" \
   --entrypoint python3 synapse - <<'PYEOF'
 import os, yaml
 
@@ -295,6 +311,50 @@ for listener in config.get("listeners", []):
         if "client" in names and "openid" not in names:
             names.append("openid")
         res["names"] = names
+
+# Group calls (issue #2): MSC4143 RTC transport discovery. Synapse v1.161.0 serves
+# GET /_matrix/client/unstable/org.matrix.msc4143/rtc/transports once the experimental flag is on
+# (verified live: /versions then reports "org.matrix.msc4143": true). Element X (Android) reads
+# THIS endpoint, not the .well-known, so the URL here must be the public one -- never
+# "http://lk-jwt-service:8080", which only resolves inside the Docker network.
+config.setdefault("experimental_features", {})["msc4143_enabled"] = True
+config["matrix_rtc"] = {
+    "transports": [
+        {"type": "livekit", "livekit_service_url": os.environ["LIVEKIT_SERVICE_URL"]},
+    ]
+}
+
+# Group calls (issue #2): joining an Element Call means sending an
+# `org.matrix.msc3401.call.member` STATE event. Synapse's default room power levels put every
+# state event at 50 (state_default), so in any room not created by Element Web itself (bot, admin
+# API, scripts, Element X) an ordinary teacher (level 0) gets 403 M_FORBIDDEN, Element Call's
+# MembershipManager shuts down, and the LiveKit connection is torn down as "Client initiated
+# disconnect" -- the root cause of round 1's second-participant abort (reproduced live, round 2).
+# Same values Element Web itself uses when it creates a room with group calls on: members may
+# join (0), only admins may start the legacy call object (100). Synapse applies this per preset
+# by REPLACING top-level keys, so the full default `events` map is repeated here.
+_room_events = {
+    "m.room.name": 50,
+    "m.room.avatar": 50,
+    "m.room.canonical_alias": 50,
+    "m.room.power_levels": 100,
+    "m.room.history_visibility": 100,
+    "m.room.encryption": 100,
+    "m.room.server_acl": 100,
+    "m.room.tombstone": 100,
+    "org.matrix.msc3401.call.member": 0,
+    "org.matrix.msc3401.call": 100,
+}
+# MSC4140 delayed events: Element Call schedules a "leave" that Synapse sends by itself if the
+# client stops refreshing it (phone dies, tab closed, network gone). Without this, a crashed
+# client's call.member event lingers as a "Waiting for media..." ghost tile until it expires
+# (hours) -- seen live in round 2 ("Not using delayed event because the endpoint is not
+# supported"). Setting a max duration is what turns the endpoint on in Synapse.
+config["max_event_delay_duration"] = "24h"
+config["default_power_level_content_override"] = {
+    preset: {"events": dict(_room_events)}
+    for preset in ("private_chat", "trusted_private_chat", "public_chat")
+}
 
 with open(path, "w") as f:
     yaml.safe_dump(config, f, default_flow_style=False, sort_keys=False)
@@ -478,6 +538,9 @@ mkdir -p "${LIVEKIT_DIR}"
   # NAT-traversal reason coturn's RUNBOOK section does. Tracked alongside issue #6 in
   # docs/CALLING.md rather than invented here.
   echo "  use_external_ip: false"
+  if [[ -n "${LIVEKIT_NODE_IP}" ]]; then
+    echo "  node_ip: ${LIVEKIT_NODE_IP}"
+  fi
   echo "keys:"
   echo "  ${LIVEKIT_API_KEY}: ${LIVEKIT_API_SECRET}"
   echo "room:"
