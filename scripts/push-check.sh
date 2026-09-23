@@ -42,23 +42,6 @@ check() {
   fi
 }
 
-json_field() {
-  # args: <json-string> <key> [default] -- never raises, mirrors scripts/e2e.sh's helper.
-  local json="$1" key="$2" default="${3:-}"
-  python3 -c "
-import json, sys
-raw, key, default = sys.argv[1], sys.argv[2], sys.argv[3]
-try:
-    d = json.loads(raw)
-except Exception:
-    d = {}
-if not isinstance(d, dict):
-    d = {}
-val = d.get(key, default)
-print(val if val is not None else default)
-" "${json}" "${key}" "${default}" 2>/dev/null
-}
-
 json_list_contains() {
   local json="$1" key="$2" value="$3"
   python3 -c "
