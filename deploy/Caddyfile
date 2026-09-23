@@ -1,22 +1,33 @@
-# Rumi Messenger TLS front door -- only used with `docker compose --profile tls up -d`.
-# Fill in your real domain via the SERVER_NAME env var before starting this profile.
+# Rumi Messenger TLS front door -- only used with `docker compose --profile prod up -d` (older
+# alias: `--profile tls`). PUBLIC_DOMAIN/ELEMENT_DOMAIN/CADDY_TLS_MODE come from deploy/.env
+# (scripts/setup.sh writes PUBLIC_DOMAIN/ELEMENT_DOMAIN in for you, defaulted from SERVER_NAME).
 #
-# Serves:
-#   https://{$SERVER_NAME}                      -> Element Web (the app)
-#   https://{$SERVER_NAME}/_matrix, /_synapse    -> Synapse (client-server + media + federation)
-#   https://{$SERVER_NAME}/.well-known/matrix/*  -> server discovery (so clients/federation find
-#                                                    Synapse without SERVER_NAME == the Synapse host)
+# Serves, on BOTH domains (the common case is PUBLIC_DOMAIN == ELEMENT_DOMAIN, one address doing
+# everything; setting ELEMENT_DOMAIN differently just adds a second hostname to the same rules):
+#   https://{$PUBLIC_DOMAIN}(/{$ELEMENT_DOMAIN})  -> Element Web (the app) at "/"
+#   .../_matrix, /_synapse                        -> Synapse (client-server + media + federation)
+#   .../.well-known/matrix/*                       -> server discovery -- MUST resolve at the
+#                                                      literal Matrix server_name (PUBLIC_DOMAIN)
+#                                                      for federation/clients to find Synapse;
+#                                                      harmless to also serve on ELEMENT_DOMAIN.
+#
+# `tls {$CADDY_TLS_MODE}` -- blank (production default) is a bare `tls` directive, same as
+# omitting it: Caddy manages a real Let's Encrypt cert automatically (needs 80/443 reachable from
+# the internet for ACME). Set CADDY_TLS_MODE=internal for a local self-signed proof with no
+# public DNS -- see docs/RUNBOOK.md.
 
-{$SERVER_NAME} {
+{$PUBLIC_DOMAIN}, {$ELEMENT_DOMAIN} {
+	tls {$CADDY_TLS_MODE}
+
 	handle /.well-known/matrix/server {
 		header Content-Type application/json
-		respond `{"m.server": "{$SERVER_NAME}:443"}` 200
+		respond `{"m.server": "{$PUBLIC_DOMAIN}:443"}` 200
 	}
 
 	handle /.well-known/matrix/client {
 		header Content-Type application/json
 		header Access-Control-Allow-Origin *
-		respond `{"m.homeserver": {"base_url": "https://{$SERVER_NAME}"}, "m.identity_server": {"base_url": "https://vector.im"}}` 200
+		respond `{"m.homeserver": {"base_url": "https://{$PUBLIC_DOMAIN}"}, "m.identity_server": {"base_url": "https://vector.im"}}` 200
 	}
 
 	handle /_matrix/* {

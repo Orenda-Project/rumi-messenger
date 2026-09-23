@@ -152,17 +152,35 @@ see [LOGGING.md](LOGGING.md) for the field reference and what a healthy line loo
 scripts/backup.sh
 ```
 
-Writes `backups/<UTC timestamp>/postgres.sql` (a `pg_dump` of the `synapse` database) and
+Writes `backups/<UTC timestamp>/postgres.sql` (a `pg_dump` of the `synapse` database),
 `backups/<UTC timestamp>/media_store.tar.gz` (everything under
-`deploy/synapse/data/media_store`). Verified on this stack:
+`deploy/synapse/data/media_store`), and `backups/<UTC timestamp>/<SERVER_NAME>.signing.key` (the
+homeserver's identity key -- losing it without a backup means every client has to re-verify from
+scratch, same blast radius as losing Postgres). Then **restore-verifies itself**: spins a
+throwaway, fully isolated scratch Postgres container (no shared volume/network with the real
+stack), restores the just-written `postgres.sql` into it, counts rows in `users`, and tears the
+scratch container down -- proof the dump is a real, loadable database, not just non-empty bytes.
+Finally prunes `backups/` down to the newest `BACKUP_KEEP_N` timestamped folders (`deploy/.env`,
+default 14). Pass `--skip-verify` to skip the restore-verification step (e.g. a very large media
+store where you just want "did the files get written").
+
+Verified live on this stack (real numbers from a real run, not illustrative):
 
 ```
-[backup] dumping postgres -> backups/20260921T095241Z/postgres.sql
-[backup] archiving media_store -> backups/20260921T095241Z/media_store.tar.gz
-[backup] done: backups/20260921T095241Z
+[backup] dumping postgres -> backups/20260923T165719Z/postgres.sql
+[backup] archiving media_store -> backups/20260923T165719Z/media_store.tar.gz
+[backup] copying signing key(s) -> backups/20260923T165719Z/
+[backup] done: backups/20260923T165719Z
+[backup] restore-verify: starting scratch postgres (rumi-backup-verify-20260923T165719Z)
+[backup] restore-verify: waiting for scratch postgres to accept connections
+[backup] restore-verify: loading backups/20260923T165719Z/postgres.sql into scratch postgres
+[backup] RESTORE VERIFIED: users table has 182 row(s) after restoring this backup into a scratch database
+[backup] rotation: 3 backups on disk, under BACKUP_KEEP_N=14, nothing to remove
 ```
 
-**Restore** (not scripted -- do this deliberately, and stop Synapse first):
+**Restore into the real stack** (not scripted -- do this deliberately, and stop Synapse first;
+`scripts/backup.sh` above already proves the dump itself restores cleanly, this is the separate,
+deliberate step of putting it back into production):
 
 ```bash
 cd deploy
@@ -176,13 +194,52 @@ cat ../backups/<timestamp>/postgres.sql | docker compose exec -T postgres psql -
 docker run --rm -v "$(pwd)/synapse/data:/data" -v "$(pwd)/../backups/<timestamp>:/backup:ro" \
   alpine sh -c 'rm -rf /data/media_store && tar -xzf /backup/media_store.tar.gz -C /data'
 
+# Signing key (only if it was ever lost/corrupted -- restoring it when the live one is still
+# fine and DIFFERENT will break every existing client's trust of this server's identity)
+docker run --rm -v "$(pwd)/synapse/data:/data" -v "$(pwd)/../backups/<timestamp>:/backup:ro" \
+  alpine sh -c 'cp /backup/*.signing.key /data/ && chown 991:991 /data/*.signing.key && chmod 600 /data/*.signing.key'
+
 docker compose start synapse
 ```
 
 A restore replaces live data with the backup's -- anything sent between the backup and the
-restore is gone. There's no partial/incremental restore here; back up on a schedule (cron +
-`scripts/backup.sh`) if you need finer recovery points, and prune `backups/` yourself -- nothing
-does it for you.
+restore is gone. There's no partial/incremental restore here; back up on a schedule if you need
+finer recovery points.
+
+**Scheduling** -- nightly via cron (add with `crontab -e`; adjust the repo path):
+
+```cron
+0 3 * * * cd /path/to/rumi-messenger && scripts/backup.sh >> /var/log/rumi-backup.log 2>&1
+```
+
+or as a systemd timer (`/etc/systemd/system/rumi-backup.service` + `.timer`):
+
+```ini
+# rumi-backup.service
+[Unit]
+Description=Rumi Messenger backup
+
+[Service]
+Type=oneshot
+WorkingDirectory=/path/to/rumi-messenger
+ExecStart=/path/to/rumi-messenger/scripts/backup.sh
+```
+
+```ini
+# rumi-backup.timer
+[Unit]
+Description=Nightly Rumi Messenger backup
+
+[Timer]
+OnCalendar=*-*-* 03:00:00
+Persistent=true
+
+[Install]
+WantedBy=timers.target
+```
+
+`systemctl enable --now rumi-backup.timer`. `BACKUP_KEEP_N` (`deploy/.env`) bounds disk usage --
+raise it if you want more history than the default 14 days at a nightly cadence.
 
 ## Upgrading pinned images
 
@@ -212,18 +269,28 @@ Never move a tag back to `:latest` -- it defeats the whole point of pinning (see
 ## Moving to a real domain (TLS)
 
 By default Synapse and Element bind to `127.0.0.1` only -- nothing is reachable off the host. To
-serve a real domain with TLS, use the `tls` Compose profile, which brings up Caddy
-(`deploy/Caddyfile`) as the front door:
+serve a real domain with TLS, use the `prod` Compose profile (older alias: `tls` -- same service,
+kept for back-compat), which brings up Caddy (`deploy/Caddyfile`) as the front door:
 
 ```bash
 # in deploy/.env:
 SERVER_NAME=chat.yourschool.org
 PUBLIC_BASE_URL=https://chat.yourschool.org
-BIND_ADDR=0.0.0.0        # so Caddy (and only Caddy) is reachable from outside
+# PUBLIC_DOMAIN / ELEMENT_DOMAIN default from SERVER_NAME -- leave them unset unless you
+# deliberately want Element Web on a different subdomain (see deploy/.env.example).
+# BIND_ADDR stays 127.0.0.1 -- see the correction below, this is NOT the "make it public" switch.
 
 cd deploy
-docker compose --profile tls up -d
+docker compose --profile prod up -d
 ```
+
+**Do NOT set `BIND_ADDR=0.0.0.0` to "make it public".** Caddy reaches Synapse and Element over
+the internal Docker network by service name (`synapse:8008`, `element:80`), never through their
+host-published ports -- widening `BIND_ADDR` only adds a second, unprotected way to reach them
+that skips Caddy's TLS termination and rate limiting entirely. `BIND_ADDR=127.0.0.1` is correct
+in production, not just for local testing; Caddy's own `80`/`443` (docker-compose.yml, always
+published on every interface once the profile is up) are the only ports that need to be reachable
+from the internet. `scripts/prod-check.sh` (below) asserts this.
 
 `SERVER_NAME` is baked into every Matrix user id and room alias **at homeserver-generation
 time** -- if you already ran `setup.sh` with `SERVER_NAME=localhost`, changing it later means
@@ -235,6 +302,42 @@ Caddy handles `/.well-known/matrix/server` and `/.well-known/matrix/client` for 
 `deploy/Caddyfile`), so clients can discover your homeserver from just the domain, and gets you
 automatic TLS via Let's Encrypt as long as ports 80/443 are reachable from the internet for the
 ACME challenge.
+
+**Proving the TLS path with no domain yet** -- set `CADDY_TLS_MODE=internal` in `deploy/.env`
+before bringing the `prod` profile up: Caddy then mints its own self-signed cert instead of
+trying (and failing) real ACME, so the whole reverse-proxy/well-known/TLS-handshake path can be
+proven on a machine with no public DNS. Verified live against this exact repo's dev stack:
+
+```
+$ grep -E '^(PUBLIC_DOMAIN|ELEMENT_DOMAIN|CADDY_TLS_MODE)=' deploy/.env
+PUBLIC_DOMAIN=localhost
+ELEMENT_DOMAIN=localhost
+CADDY_TLS_MODE=internal
+
+$ curl -sk --resolve localhost:443:127.0.0.1 https://localhost/.well-known/matrix/server
+{"m.server": "localhost:443"}
+```
+
+Never leave `CADDY_TLS_MODE=internal` set once a real domain exists -- browsers refuse a
+self-signed cert (`-k`/an explicit "proceed anyway" click is the only way past it), which is
+exactly what marks it as a local-only proof.
+
+### `scripts/prod-check.sh` -- the falsifiable version of "is this actually hardened"
+
+Asserts the safety posture above against a **running** stack: TLS/well-known actually served,
+registration closed, Postgres/Synapse/Element not directly exposed, coturn hardening
+(`no-tcp-relay`, `denied-peer-ip`) applied, `enable_metrics` off, `deploy/.env` gitignored.
+
+```bash
+scripts/prod-check.sh
+```
+
+Several checks are **supposed** to fail against the plain dev stack (no Caddy, open
+registration) -- that's what makes this a real check and not a script that always prints PASS.
+Verified live on this repo: 6/11 failing with the `prod` profile down, 10/11 passing once it was
+brought up with `CADDY_TLS_MODE=internal` (the one still-failing check, registration, is real --
+`REGISTRATION_MODE` on this dev stack is deliberately left `open` for testing; flip it to `token`
+before inviting real teachers, see "Registration modes" below).
 
 ## Calls (1:1 audio/video, issue #1)
 
@@ -411,11 +514,15 @@ the js-sdk `getEncryptionInfoForEvent` check and in Element Web.
 ## Rate limits
 
 Synapse's rate limits live in `homeserver.yaml` under the `rc_*` keys (`rc_message`,
-`rc_registration`, `rc_login`, `rc_joins`, etc.) -- this stack ships Synapse's own defaults
-(`scripts/setup.sh` doesn't touch them). They exist to stop a single client from hammering the
-server, not to throttle normal classroom traffic; you're unlikely to need to change them for a
-school-sized deployment. If you do (e.g. a bulk-import script tripping `rc_registration` while
-creating many accounts at once), edit `deploy/synapse/data/homeserver.yaml` directly and restart:
+`rc_login`, `rc_joins`, `rc_invites`, etc.). **`scripts/setup.sh` does NOT ship Synapse's own
+defaults here** (an earlier version of this doc said it did -- corrected, issue #6): Synapse's
+public-server-facing defaults are tight enough that our own testing tripped the login limiter
+repeatedly (a staffroom signing in together at 8am, or a class joining a room together, reads as
+abuse at those defaults), so `setup.sh` Step 3 sets school-shaped values instead --
+`rc_login`/`rc_joins`/`rc_message`/`rc_invites` all raised from Synapse's defaults, see the
+comments right above those keys in `scripts/setup.sh` for the exact numbers and reasoning. If you
+need to change them further (e.g. a bulk-import script still tripping a limit while creating many
+accounts at once), edit `deploy/synapse/data/homeserver.yaml` directly and restart:
 
 ```bash
 cd deploy && docker compose restart synapse
@@ -473,3 +580,84 @@ API](https://element-hq.github.io/synapse/latest/admin_api/media_admin_api.html)
 | coturn logs `WARNING Bad configuration format: no-dtls` on startup | (cosmetic, not fatal -- coturn still starts and works) | Would indicate a stale `deploy/coturn/turnserver.conf` from before this repo's coturn 4.18.0 pin -- that version removed the `no-dtls` directive (DTLS is opt-in via a separate `--dtls` flag, off by default). Re-run `scripts/setup.sh`, which renders a fresh `turnserver.conf` without it every time. |
 | `docker compose up -d coturn` doesn't pick up a `turnserver.conf` change | `docker logs rumi-coturn` shows a config from before your edit, or (worse) `WARNING NO EXPLICIT LISTENER ADDRESS(ES) ARE CONFIGURED` binding every interface instead of `BIND_ADDR` | Same stale-container-after-rewriting-a-mounted-file issue Element already had (see the `welcome.html`/`home.html` row above) -- `scripts/setup.sh` force-recreates `coturn` every run for exactly this reason (discovered live: coturn ran for 2+ minutes on a config it couldn't even read after a plain `up -d` no-op'd). If you edit `turnserver.conf` by hand outside `setup.sh`, run `docker compose up -d --force-recreate coturn` yourself, not a plain `up -d`. |
 | coturn's `turnserver.conf` can't be rewritten on a rerun | `scripts/setup.sh` fails with `Permission denied` writing `deploy/coturn/turnserver.conf` | Expected and handled: a prior run `chown`'d the file to coturn's fixed runtime uid (65534, "nobody") and `chmod 600`'d it so the container can read a secret it doesn't own the host-side copy of. `setup.sh` `rm -f`s the file before re-rendering (removing a file only needs write access to its *directory*, which your host user does own) -- if you see this error, something removed that `rm -f` step. |
+
+## Going live on a real domain (issue #6 -- the actual checklist)
+
+Everything above (`prod`/`tls` profile, `scripts/prod-check.sh`, `scripts/backup.sh`) has been
+proven **locally**, with `CADDY_TLS_MODE=internal` standing in for a real domain -- see each
+section above for the exact commands and output. What's proven vs. what genuinely needs a real
+domain/server, and can't be faked from this machine:
+
+**Proven here, ready to use as-is:**
+- Caddy (`prod`/`tls` profile) terminates TLS and serves `.well-known/matrix/{server,client}`
+  correctly, driven entirely by `PUBLIC_DOMAIN`/`ELEMENT_DOMAIN`/`CADDY_TLS_MODE` in `deploy/.env`.
+- `BIND_ADDR=127.0.0.1` keeps Synapse/Element/Postgres off the network with Caddy still able to
+  reach them (the RUNBOOK's own earlier "set BIND_ADDR=0.0.0.0" advice was wrong and is now
+  corrected above).
+- coturn hardening: `no-tcp-relay` (always on) and `denied-peer-ip` for private/loopback ranges
+  (once `BIND_ADDR` is public) -- `scripts/setup.sh` Step 5.
+- `scripts/backup.sh` produces a dated, rotated, **restore-verified** backup (Postgres + media +
+  signing key) -- proven end to end against this repo's real dev data (182 `users` rows restored
+  into a scratch database).
+- `scripts/prod-check.sh` catches real regressions -- verified live to FAIL 6/11 checks on the
+  plain dev stack and PASS 10/11 once `prod`/`tls` was up with `CADDY_TLS_MODE=internal` (the one
+  remaining fail, open registration, is real and expected -- see below).
+
+**Needs a real domain/server to actually finish (can't be proven from a laptop):**
+- A publicly trusted TLS cert -- `CADDY_TLS_MODE=internal`'s self-signed cert proves the mechanism,
+  not the cert; real ACME needs ports 80/443 reachable from the internet.
+- `TURN_EXTERNAL_IP` for coturn behind NAT, and a real cross-device call (no way to prove NAT
+  traversal between two independent networks from one host -- see the "Calls" section above).
+- Flipping `REGISTRATION_MODE=open` to `token` and minting real tokens for a school's staff
+  (`docs/RUNBOOK.md`'s "Registration modes" section has the admin-API command) -- left `open` on
+  this repo's own dev stack deliberately, since flipping it would break existing local/e2e testing
+  flows that assume open registration; a real deployment should decide this before inviting
+  teachers.
+- Deciding and setting real media retention (see "Media retention" above) and a disk-size budget
+  once real upload volume exists.
+
+### DNS records to create
+
+| Record | Type | Points to | Why |
+|---|---|---|---|
+| `PUBLIC_DOMAIN` (e.g. `chat.yourschool.org`) | A / AAAA | your server's public IP | Matrix identity, `.well-known`, federation (if ever enabled) |
+| `ELEMENT_DOMAIN` (only if different from `PUBLIC_DOMAIN`) | A / AAAA | same server (or a separate one fronting it) | Element Web's own address |
+
+If `PUBLIC_DOMAIN == ELEMENT_DOMAIN` (the default, and the common case -- one address doing
+everything), you only need the one record.
+
+### Ports to open on the server's firewall / cloud security group
+
+| Port(s) | Protocol | Service | Notes |
+|---|---|---|---|
+| 80 | TCP | Caddy | ACME HTTP-01 challenge + HTTP->HTTPS redirect |
+| 443 | TCP | Caddy | Matrix client/federation API + Element Web, all through Caddy |
+| 8448 | TCP | -- | Only if federation is ever turned on (currently OFF, issue #8) -- not needed for this deployment shape |
+| `TURN_PORT` (3478 default) | TCP + UDP | coturn | STUN/TURN signalling |
+| `TURN_MIN_PORT`-`TURN_MAX_PORT` (49152-65535 default) | **UDP only** | coturn | Relayed call media -- see "Calls" section above for why this must be UDP, not just the signalling port |
+
+Do **not** open Synapse's `SYNAPSE_PORT`, Element's `ELEMENT_PORT`, or Postgres's `5432` directly
+-- they should never be reachable except through Caddy / the Docker-internal network. Run
+`scripts/prod-check.sh` after opening ports to confirm this is still true from the outside, not
+just from `localhost`.
+
+### First-run sequence on the real server
+
+1. Point DNS at the server (above); confirm it resolves before continuing (`dig +short
+   PUBLIC_DOMAIN`).
+2. `git clone` this repo, `cd deploy`.
+3. Set in `deploy/.env` (or export before running `setup.sh`, same effect): `SERVER_NAME`,
+   `PUBLIC_BASE_URL=https://<PUBLIC_DOMAIN>`, `REGISTRATION_MODE=token`. Leave `BIND_ADDR` at its
+   default `127.0.0.1` and `CADDY_TLS_MODE` unset (real ACME).
+4. `scripts/setup.sh` (brings up Postgres/Synapse/Element/coturn, generates the homeserver).
+5. `docker compose --profile prod up -d` (brings up Caddy; first run does the real ACME
+   handshake -- watch `scripts/logs.sh -s caddy` for "certificate obtained successfully").
+6. `scripts/prod-check.sh` -- every check should now PASS, including registration (confirm
+   `REGISTRATION_MODE=token` took effect) and the TLS/well-known checks (now against a real,
+   publicly trusted cert instead of `-k`).
+7. Mint a registration token and onboard the first real teacher accounts
+   (`scripts/teacher.sh`, "Registration modes" section above).
+8. Put `scripts/backup.sh` on the cron/systemd-timer schedule above.
+9. If real cross-device calling is needed: set `TURN_EXTERNAL_IP`, re-run `setup.sh`, and have two
+   people on two different networks actually place a call -- the one thing that can't be verified
+   from the server alone.

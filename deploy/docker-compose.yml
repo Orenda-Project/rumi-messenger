@@ -180,20 +180,32 @@ services:
       retries: 10
       start_period: 10s
 
-  # Optional TLS/reverse-proxy front door for a real domain. Not started by default --
-  # `docker compose --profile tls up -d` brings it up. See deploy/Caddyfile.
+  # Optional TLS/reverse-proxy front door for a real domain (issue #6, production hardening).
+  # Not started by default -- `docker compose --profile prod up -d` (or the older alias
+  # `--profile tls`, kept for back-compat) brings it up. See deploy/Caddyfile.
   caddy:
     image: caddy:2-alpine
     container_name: ${RUMI_CONTAINER_PREFIX:-rumi}-caddy
     restart: unless-stopped
     logging: *default-logging
-    profiles: ["tls"]
+    profiles: ["tls", "prod"]
     depends_on:
       - synapse
       - element
+    # Always published on every interface, regardless of BIND_ADDR -- this is deliberately the
+    # ONE thing in this stack that's reachable from outside by default once this profile is on;
+    # everything else (Synapse, Element, Postgres) stays behind it (see BIND_ADDR's comment in
+    # deploy/.env.example).
     ports:
       - "80:80"
       - "443:443"
+    environment:
+      # Caddyfile reads these via Caddy's own {$VAR} env substitution -- scripts/setup.sh always
+      # writes PUBLIC_DOMAIN/ELEMENT_DOMAIN/CADDY_TLS_MODE into deploy/.env (defaulting the first
+      # two from SERVER_NAME) so they're never unset here.
+      PUBLIC_DOMAIN: ${PUBLIC_DOMAIN}
+      ELEMENT_DOMAIN: ${ELEMENT_DOMAIN}
+      CADDY_TLS_MODE: ${CADDY_TLS_MODE:-}
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
       - rumi-caddy-data:/data

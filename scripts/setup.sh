@@ -41,7 +41,7 @@ fill_env_var() {
 # `SYNAPSE_PORT=8208 ELEMENT_PORT=8283 scripts/setup.sh`). These must win over both a freshly
 # copied .env.example AND an existing deploy/.env -- otherwise `source`-ing the file below would
 # silently clobber the caller's exported values back to whatever the file says.
-OVERRIDE_VARS=(SERVER_NAME PUBLIC_BASE_URL SYNAPSE_PORT ELEMENT_PORT BIND_ADDR REGISTRATION_MODE COMPOSE_PROJECT_NAME RUMI_CONTAINER_PREFIX TURN_PORT TURN_MIN_PORT TURN_MAX_PORT)
+OVERRIDE_VARS=(SERVER_NAME PUBLIC_BASE_URL SYNAPSE_PORT ELEMENT_PORT BIND_ADDR REGISTRATION_MODE COMPOSE_PROJECT_NAME RUMI_CONTAINER_PREFIX TURN_PORT TURN_MIN_PORT TURN_MAX_PORT PUBLIC_DOMAIN ELEMENT_DOMAIN CADDY_TLS_MODE BACKUP_KEEP_N)
 for _v in "${OVERRIDE_VARS[@]}"; do
   eval "PRESET_${_v}=\"\${${_v}:-}\""
 done
@@ -121,6 +121,18 @@ REGISTRATION_MODE="${REGISTRATION_MODE:-open}"
 TURN_PORT="${TURN_PORT:-3478}"
 TURN_MIN_PORT="${TURN_MIN_PORT:-49152}"
 TURN_MAX_PORT="${TURN_MAX_PORT:-65535}"
+# Caddy (profile "prod"/"tls", issue #6) reads these three from its own container environment
+# (docker-compose.yml passes them through) -- write them into deploy/.env explicitly (not just a
+# bash default here) so they exist for Compose's own ${VAR} interpolation too, same reasoning as
+# every other generated value in this step.
+PUBLIC_DOMAIN="${PUBLIC_DOMAIN:-${SERVER_NAME}}"
+ELEMENT_DOMAIN="${ELEMENT_DOMAIN:-${PUBLIC_DOMAIN}}"
+CADDY_TLS_MODE="${CADDY_TLS_MODE:-}"
+BACKUP_KEEP_N="${BACKUP_KEEP_N:-14}"
+fill_env_var PUBLIC_DOMAIN "${PUBLIC_DOMAIN}"
+fill_env_var ELEMENT_DOMAIN "${ELEMENT_DOMAIN}"
+fill_env_var CADDY_TLS_MODE "${CADDY_TLS_MODE}"
+fill_env_var BACKUP_KEEP_N "${BACKUP_KEEP_N}"
 # The address Matrix clients (Element Web running in a teacher's browser) are told to open a
 # TURN connection to -- must be something those clients can actually reach, same requirement as
 # PUBLIC_BASE_URL itself, so we derive it from the same setting rather than inventing a second
@@ -368,6 +380,28 @@ rm -f "${COTURN_DIR}/turnserver.conf"
   echo "no-tls"
   echo "log-file=stdout"
   echo "simple-log"
+  # Hardening (issue #6): TURN's relay is a generic UDP/TCP forwarder by design -- without these,
+  # a malicious client that can reach this coturn could ask it to relay traffic to a TCP peer
+  # (amplification/relay-abuse vector coturn's own docs call out) or into this host's private
+  # network (SSRF via the TURN relay itself). `no-tcp-relay` disables TCP as a relay transport
+  # unconditionally (real WebRTC call media is UDP-only anyway -- see docs/RUNBOOK.md's calls
+  # section -- so this costs nothing functionally, only removes an unused attack surface).
+  echo "no-tcp-relay"
+  if [[ "${BIND_ADDR}" != "127.0.0.1" ]]; then
+    # denied-peer-ip is about where RELAYED media may go, not where coturn listens -- gated on
+    # BIND_ADDR here only because local loopback-only testing (this script's default, and
+    # scripts/e2e.sh) legitimately relays call media between two tabs on 127.0.0.1/private
+    # docker-network addresses on the SAME host, which this would otherwise block. Once BIND_ADDR
+    # is widened for a real deployment (production hardening, issue #6), block the private/link-
+    # local ranges a real internet-facing TURN server should never be relaying into (RFC 1918 +
+    # loopback + link-local, IPv4 and IPv6).
+    for range in 0.0.0.0-0.255.255.255 10.0.0.0-10.255.255.255 100.64.0.0-100.127.255.255 \
+                 127.0.0.0-127.255.255.255 169.254.0.0-169.254.255.255 172.16.0.0-172.31.255.255 \
+                 192.168.0.0-192.168.255.255 ::1 fc00::-fdff:ffff:ffff:ffff:ffff:ffff:ffff:ffff \
+                 fe80::-febf:ffff:ffff:ffff:ffff:ffff:ffff:ffff; do
+      echo "denied-peer-ip=${range}"
+    done
+  fi
   if [[ -n "${TURN_EXTERNAL_IP:-}" ]]; then
     echo "external-ip=${TURN_EXTERNAL_IP}"
   fi
