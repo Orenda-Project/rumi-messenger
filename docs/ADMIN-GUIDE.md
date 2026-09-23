@@ -263,14 +263,19 @@ encryption state. If you lose it, Rumi can't read older encrypted messages.
 
 ## 7. Push notifications
 
-> **Coming:** phones don't get a notification while the app is closed yet
-> ([#3](https://github.com/Orenda-Project/rumi-messenger/issues/3)). Messages arrive when the
-> app is opened. Tell teachers this up front.
+Push runs on our own **ntfy** server, no Google involved. Add a DNS A record for
+`ntfy.<your domain>`, run `scripts/push-setup.sh` (starts ntfy under the `push` profile; Caddy
+serves it at `https://ntfy.<your domain>`), then `scripts/push-check.sh` (4 checks, all must
+pass). Each teacher installs the ntfy app once and points it at that address before opening Rumi
+([TEACHER-GUIDE](TEACHER-GUIDE.md#6-chat-and-call-your-colleagues)). One thing to check: Synapse
+won't push to a private IP, so `docker exec rumi-synapse getent hosts ntfy.<your domain>` must give
+the public IP. On a LAN-only server you need `ip_range_whitelist` in `homeserver.yaml`
+([PUSH.md](PUSH.md#the-one-synapse-catch-pushers-cant-reach-private-ips)).
 
-The push gateway (Sygnal) is built and can be tested with `scripts/push-setup.sh` and
-`scripts/push-check.sh`. Real delivery needs three things we don't have yet: a Firebase project
-key, a matching Android build and a signed release. [PUSH.md](PUSH.md) sets out exactly what's
-done, what's missing and the no-Google (UnifiedPush) route.
+> **Coming:** the phone side is proven on the emulator with the app fully stopped; the last hop
+> (Synapse to ntfy on a real public hostname) hasn't been seen working on a live server yet
+> ([#3](https://github.com/Orenda-Project/rumi-messenger/issues/3)). The Firebase route (Sygnal)
+> is built but has no key.
 
 ## 8. Calls
 

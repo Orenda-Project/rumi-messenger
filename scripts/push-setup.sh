@@ -1,8 +1,10 @@
 #!/usr/bin/env bash
-# Rumi Messenger -- Sygnal (push gateway) setup for phone push notifications (issue #3).
-# Idempotent: safe to re-run any time. Renders deploy/sygnal/sygnal.yaml from deploy/.env and
-# starts the sygnal service (compose profile "push") ONLY if a real FCM service account file is
-# present -- see docs/PUSH.md for the honest picture of what this can and cannot do without keys.
+# Rumi Messenger -- phone push setup (issue #3). Idempotent: safe to re-run any time.
+#   1. Starts self-hosted ntfy (compose profile "push"): the UnifiedPush server + Matrix push
+#      gateway for the no-Google path. Needs no keys, always started.
+#   2. Renders deploy/sygnal/sygnal.yaml and starts Sygnal (the FCM/Google path) ONLY if a real
+#      FCM service account file is present.
+# See docs/PUSH.md.
 #
 # Requires only: docker (with the compose plugin), python3. Run scripts/setup.sh first (this
 # script reads deploy/.env, which setup.sh creates).
@@ -52,6 +54,14 @@ mkdir -p "${SYGNAL_DIR}"
 # ---------------------------------------------------------------------------
 # Step 1: check for a REAL FCM service account file. Never fabricate one.
 # ---------------------------------------------------------------------------
+# ---------------------------------------------------------------------------
+# Step 0: self-hosted ntfy (UnifiedPush, no Google). No credentials involved.
+# ---------------------------------------------------------------------------
+NTFY_BASE_URL="${NTFY_BASE_URL:-https://ntfy.${PUBLIC_DOMAIN:-localhost}}"
+log "Step 0/3: starting ntfy (UnifiedPush server + Matrix gateway) at ${NTFY_BASE_URL}"
+dc --profile push up -d --wait ntfy
+log "  ntfy up: phones point the ntfy app at ${NTFY_BASE_URL} (docs/PUSH.md); verify with scripts/push-check.sh"
+
 log "Step 1/3: checking for a real FCM service account file"
 HAVE_FCM_KEY=0
 FCM_PROJECT_ID=""

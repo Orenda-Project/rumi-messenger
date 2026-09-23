@@ -180,6 +180,55 @@ services:
       retries: 10
       start_period: 10s
 
+  # Self-hosted UnifiedPush distributor server + Matrix push gateway (issue #3, the no-Google
+  # push path). The teacher's phone runs the ntfy Android app (F-Droid build) pointed at
+  # NTFY_BASE_URL; Rumi Messenger registers a UnifiedPush endpoint on it
+  # (<NTFY_BASE_URL>/up<random>), discovers the Matrix gateway at the SAME host's
+  # /_matrix/push/v1/notify (element-x-android UnifiedPushGatewayResolver.kt), and registers
+  # that as its Synapse pusher. Synapse then POSTs straight to ntfy -- ntfy has a built-in
+  # Matrix push gateway (server/server_matrix.go), so Sygnal is NOT in this path; Sygnal is only
+  # the FCM (Google) path. Behind the "push" profile like sygnal.
+  ntfy:
+    # Pinned to the release resolved from github.com/binwiederhier/ntfy on 2026-09-24 (v2.28.0,
+    # same tag on Docker Hub binwiederhier/ntfy). To upgrade: bump the tag, then
+    # `docker compose pull ntfy && docker compose --profile push up -d ntfy`.
+    image: binwiederhier/ntfy:v2.28.0
+    container_name: ${RUMI_CONTAINER_PREFIX:-rumi}-ntfy
+    restart: unless-stopped
+    logging: *default-logging
+    profiles: ["push"]
+    command: ["serve"]
+    environment:
+      # MUST be the exact URL both the phone and Synapse use: ntfy's Matrix gateway rejects any
+      # pushkey that doesn't start with "<base-url>/". A subdomain, not a /ntfy sub-path: the
+      # app looks for the gateway at the endpoint host's ROOT (/_matrix/push/v1/notify), and on
+      # PUBLIC_DOMAIN that path belongs to Synapse (Caddy's /_matrix/*), so a sub-path would make
+      # the app silently fall back to Element's public gateway. ntfy also has no sub-path mode.
+      NTFY_BASE_URL: "${NTFY_BASE_URL:-https://ntfy.${PUBLIC_DOMAIN:-localhost}}"
+      NTFY_LISTEN_HTTP: ":80"
+      NTFY_CACHE_FILE: /var/lib/ntfy/cache.db
+      NTFY_AUTH_FILE: /var/lib/ntfy/auth.db
+      # Everything denied except UnifiedPush topics (all "up*"): anonymous read (the phone's
+      # subscription) + write (the Matrix gateway publish). Topic names are random per app.
+      NTFY_AUTH_DEFAULT_ACCESS: "deny-all"
+      NTFY_AUTH_ACCESS: "*:up*:read-write"
+      # All pushes arrive from ONE visitor (Synapse); count them against the subscriber instead,
+      # per ntfy's own UnifiedPush guidance, so one busy school doesn't hit one shared limit.
+      NTFY_VISITOR_SUBSCRIBER_RATE_LIMITING: "true"
+      NTFY_BEHIND_PROXY: "${NTFY_BEHIND_PROXY:-true}"
+      # NTFY_UPSTREAM_BASE_URL deliberately unset: that forwards poll requests to ntfy.sh ->
+      # Firebase/APNs for iOS. This path is Android + no Google.
+    volumes:
+      - rumi-ntfy-data:/var/lib/ntfy
+    ports:
+      - "${BIND_ADDR:-127.0.0.1}:${NTFY_PORT:-2586}:80"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O - http://localhost:80/v1/health | grep -q '\"healthy\":true'"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 5s
+
   # Group calls + screen sharing (issue #2). LiveKit is the SFU that mixes/forwards media for
   # 3+ participants (1:1 calls stay peer-to-peer via coturn above, issue #1); lk-jwt-service is
   # the bridge Element Web's built-in Element Call widget talks to for a signed LiveKit token,
@@ -325,6 +374,8 @@ services:
       ELEMENT_DOMAIN: ${ELEMENT_DOMAIN}
       CADDY_TLS_MODE: ${CADDY_TLS_MODE:-}
       LIVEKIT_SERVICE_URL: "${LIVEKIT_SERVICE_URL:-https://${PUBLIC_DOMAIN:-localhost}/livekit/jwt}"
+      # ntfy's own hostname (issue #3, push). Needs its own DNS A record in production.
+      NTFY_DOMAIN: "${NTFY_DOMAIN:-ntfy.${PUBLIC_DOMAIN:-localhost}}"
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
       - rumi-caddy-data:/data
@@ -346,6 +397,7 @@ services:
           - ${PUBLIC_DOMAIN:-localhost}
 
 volumes:
+  rumi-ntfy-data:
   rumi-postgres-data:
   rumi-caddy-data:
   rumi-caddy-config:

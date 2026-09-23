@@ -14,7 +14,7 @@ your school's admin. They can [report it to us](https://github.com/Orenda-Projec
 4. [Say hello to Rumi](#4-say-hello-to-rumi)
 5. [What you can ask Rumi](#5-what-you-can-ask-rumi)
 6. [Chat and call your colleagues](#6-chat-and-call-your-colleagues)
-7. [Save your recovery key (do this on day one)](#7-save-your-recovery-key-do-this-on-day-one)
+7. [Save your backup code (do this on day one)](#7-save-your-backup-code-do-this-on-day-one)
 8. [Use a second phone or a computer](#8-use-a-second-phone-or-a-computer)
 9. [What is private](#9-what-is-private)
 10. [Something is wrong](#10-something-is-wrong)
@@ -84,9 +84,9 @@ nothing to install.
    (This picture was taken on a test server. Yours shows your school's address.)
 
 5. The app may ask about notifications. You can say yes or no. Rumi works the same way whatever
-   you choose. If a box appears saying "No distributors available", tap OK and carry on: it only
-   means the phone has no service to deliver notifications while the app is closed. Messages
-   still arrive whenever the app is open.
+   you choose. If a box appears saying "No distributors available", tap OK and carry on: it means
+   the **ntfy** app isn't set up yet (see "About notifications" in section 6). Messages still
+   arrive whenever the app is open.
 
 ### In the web app
 
@@ -170,22 +170,30 @@ or video call.
 
 About notifications:
 
-> **Coming: notifications when the app is closed.** At the moment, your phone doesn't ring or
-> buzz for new messages while the app is closed. You see them when you open the app
-> ([#3](https://github.com/Orenda-Project/rumi-messenger/issues/3)). Open the app a few times a
-> day, or keep the web app open in a browser tab.
+To get notifications while Rumi is closed, your phone needs one more free app, **ntfy**. Do this
+once, when your admin gives you the ntfy address:
 
-## 7. Save your recovery key (do this on day one)
+1. Install **ntfy** (from F-Droid, or the link your admin sends). Allow its notifications, and tap
+   **Allow** when it asks to run in the background.
+2. In ntfy, tap the menu (three dots), then **Settings**, then **Default server**. Type the
+   address your admin gave you (it starts `https://ntfy.`) and tap **Save**. Do this *before*
+   opening Rumi.
+3. Open Rumi. The "No distributors available" box no longer appears.
 
-Your messages are locked with keys that only live on your own devices. The **recovery key** is
-a long code that lets you unlock your old messages on a new phone. Without it, a new phone can't
-read your earlier chats.
+> **Coming: notifications when the app is closed.** Your admin is still finishing this on the
+> server ([#3](https://github.com/Orenda-Project/rumi-messenger/issues/3)). Until they say it's
+> on, open the app a few times a day, or keep the web app open in a browser tab.
 
-1. At the top of the chat list, the app shows **Back up your chats** (you can see it in the
-   picture in [section 4](#4-say-hello-to-rumi)). Tap **Get recovery key**. (Or go to
-   **Settings**, then **Encryption**, and turn on **Allow key storage**.)
+## 7. Save your backup code (do this on day one)
+
+Your messages are locked with keys that only live on your own devices. The **backup code** is a
+long code that opens your old messages on a new phone. Without it, a new phone can't read your
+earlier chats. (App versions up to v0.1.1 call it the **recovery key**. It's the same thing.)
+
+1. At the top of the chat list, the app shows **Save your backup code**. Tap **Get backup code**.
+   (Or go to **Settings**, then **Encryption**.)
 2. The app shows a code. Write it on paper, or save it somewhere private that isn't this phone.
-3. Don't share it. Your admin doesn't have it and can't recover it for you.
+3. Don't share it. Your admin doesn't have it and can't get it back for you.
 
 ## 8. Use a second phone or a computer
 
@@ -194,23 +202,27 @@ most problems happen, so follow these steps in this order:
 
 1. **Keep your first device open and signed in.**
 2. Sign in on the new device ([section 3](#3-sign-in)).
-3. The new device asks you to **confirm it's you**. Choose one of these:
-   - **Use another device**: your first device shows a prompt. Approve it there.
-   - **Enter your recovery key**: type the code from [section 7](#7-save-your-recovery-key-do-this-on-day-one).
-4. When the new device says it's verified, you're done. Your old messages appear on it.
+3. The new device shows **Confirm it's you**. Choose one of these:
+   - **Approve on my other phone or computer**: your first device shows a prompt. Approve it there.
+   - **Enter my backup code**: type the code from [section 7](#7-save-your-backup-code-do-this-on-day-one).
+4. When the new device says it's confirmed, you're done. Your old messages appear on it.
 
-**If you see a red "Can't confirm? You'll need to reset your digital identity" screen, stop.**
+**If you see "Can't confirm? You can start fresh.", stop.**
 
-![The reset warning](img/teacher-6-reset-warning.png)
+![The start-fresh warning](img/teacher-6-reset-warning.png)
 
-Don't tap **Continue reset** unless you've truly lost your recovery key and every other device.
-A reset keeps your account and chat list. But every message you had before shows up as
+Don't tap **Start fresh** unless you've truly lost your backup code and every other device.
+Starting fresh keeps your account and chat list. But every message you had before shows up as
 "Waiting for this message" and never opens. Go back, open your first device, or find your
-recovery key, and try again.
+backup code, and try again. (App versions up to v0.1.1 word this screen as "reset your digital
+identity", with a **Continue reset** button, as in the picture.)
+
+**Your messages always send.** An old phone or a half-finished sign-in left on your account no
+longer stops your messages. You don't need to fix anything first.
 
 **Signing out of an old phone.** When you stop using a device, sign out of it (**Settings**, then
-**Sign out**). Devices you've left signed in, even half-finished sign-ins, can stop your messages
-from sending (see below).
+**Sign out**), or ask your admin to remove it. A device left signed in can still receive your new
+messages, so never leave one signed in on a phone you've given away.
 
 ## 9. What is private
 
@@ -230,13 +242,13 @@ from sending (see below).
 |---|---|
 | A spinner that never stops after you type the server address | Check that you typed `https://` or `http://` at the start, then try again. If you can, copy the address exactly as your admin sent it. |
 | "Invalid username or password" | Type the username with the `+` and no spaces: `+923001234567`. Passwords are case-sensitive. If it still fails, ask your admin to reset your password. There's no "forgot password" email. |
-| A message has a red mark and says "Message not sent because you have not verified one or more of your devices" | Press and hold the message, open the details, and tap **Send message anyway**. Then tell your admin. They can remove the old, unfinished sign-ins that cause it, and after that your messages send normally again. |
+| A message has a red mark and says "Message not sent because you have not verified one or more of your devices" | Only app versions up to v0.1.1 do this. Install the newer app from your admin's link. Until then: press and hold the message, open the details, and tap **Send message anyway**, and tell your admin so they can remove your old sign-ins. |
 | You don't see a Rumi chat at all | Wait a minute, then pull the chat list down to refresh it. If Rumi still isn't there, tell your admin: the Rumi service may not be connected to your school's server yet. You can still chat with colleagues in the meantime. |
 | Rumi doesn't reply | Wait a minute, then send your message again. If Rumi still doesn't answer, tell your admin, because the Rumi service may be stopped. |
 | Rumi says it can't do something | Your school may not have switched that feature on yet. Tell your admin. |
-| Old messages show "Waiting for this message" | This device can't unlock them. Confirm it with your recovery key or another device ([section 8](#8-use-a-second-phone-or-a-computer)). If you reset your identity earlier, those messages can't be recovered. |
+| Old messages show "Waiting for this message" | This device can't open them yet. Confirm it with your backup code or another device ([section 8](#8-use-a-second-phone-or-a-computer)). If you chose **Start fresh** earlier, those messages can't be recovered. |
 | A call connects, but there's no sound or picture | Your network may block calls, or the server isn't set up for calls between networks yet. Tell your admin. |
-| No notification for a new message | Expected for now while the app is closed ([section 6](#6-chat-and-call-your-colleagues)). Open the app to check. |
+| No notification for a new message | Check ntfy is installed and its Default server is your school's ntfy address ([section 6](#6-chat-and-call-your-colleagues)). Until your admin says notifications are on, this is expected while the app is closed. Open the app to check. |
 | You can't find a colleague | Type the start of their first or last name. If they still don't appear, their account may not exist yet. Ask your admin. |
 
 Still stuck? Your school's admin is your first contact. They can check the server and

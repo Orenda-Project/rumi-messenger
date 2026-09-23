@@ -1,28 +1,122 @@
 # Push Notifications on Phones (issue #3)
 
-## The honest gap, stated plainly
+## Status (2026-09-24)
 
-**What a teacher gets today:** nothing, if the app is closed. Element only notifies while a
-browser tab (or the app, in the foreground/kept-alive) is actually open and syncing with
-Synapse. Close the tab, lock the phone, and a new message produces no sound, no banner, no
-badge -- exactly the "biggest thing standing between the current build and something a school
-could actually use daily" issue #3 describes.
+Two push paths exist. **The no-Google one (UnifiedPush + our own ntfy) is the one we ship.**
 
-**What this PR adds:** a running, correctly wired push gateway with **no real credentials in
-it**. Concretely:
+| Path | Who runs the server | Keys needed | State |
+|---|---|---|---|
+| **UnifiedPush + self-hosted ntfy** | us (`ntfy` service, `push` profile) | none | Phone half **proven** on the emulator with the app force-stopped (below). Synapse-to-ntfy hop needs a non-private address for ntfy, so it is proven only on a real deployment (see "The one Synapse catch"). |
+| Firebase (FCM) via Sygnal | us (`sygnal` service, `push` profile) | Firebase service account + `google-services.json` + signed build | Gateway built, no keys. Unchanged, see "Sygnal" below. |
 
-- [Sygnal](https://github.com/element-hq/sygnal), the reference Matrix push gateway, as a
-  `deploy/docker-compose.yml` service behind the `push` profile (`deploy/sygnal/`,
-  `scripts/push-setup.sh`, `scripts/push-check.sh`).
-- A verification script (`scripts/push-check.sh`) that proves the gateway is up and correctly
-  parsing push-gateway-API requests, entirely from this machine, with no phone.
-- The exact Synapse config the `scripts/setup.sh` owner needs to add to point Synapse at Sygnal
-  (below, under "Synapse-side config") -- not applied here, since this PR does not own
-  `scripts/setup.sh`.
-- The UnifiedPush / no-Google path documented (below) -- the one piece of this that genuinely
-  needs zero Firebase keys, today.
+**Before this change** the F-Droid/no-Google build showed "No distributors available" on every
+launch and got no notifications at all while closed: there was no distributor on the phone and no
+push server for it to talk to.
 
-**What still needs a human**, in order, before a real phone buzzes:
+## Self-hosted ntfy (the no-Google path)
+
+How Element X's own F-Droid users get push, and exactly what the fork's code does
+(`libraries/pushproviders/unifiedpush/`):
+
+1. The phone runs the **ntfy** Android app (F-Droid build) as its UnifiedPush *distributor*,
+   pointed at our server. It keeps one connection open to ntfy for every app on the phone.
+2. Rumi Messenger asks the distributor for an endpoint and gets
+   `<NTFY_BASE_URL>/up<12 random chars>?up=1` (a private ntfy topic).
+3. `UnifiedPushGatewayResolver.kt` takes that endpoint's **host root** and calls
+   `GET <host>/_matrix/push/v1/notify`. ntfy answers `{"unifiedpush":{"gateway":"matrix"}}`
+   (ntfy has a built-in Matrix push gateway, `server/server_matrix.go`), so the app registers a
+   Synapse pusher with `url = <NTFY_BASE_URL>/_matrix/push/v1/notify` and
+   `pushkey = <endpoint>`. Anything else there (404, 401, ...) makes the app silently fall back to
+   Element's public gateway, which is why ntfy needs its **own hostname**, not a `/ntfy` path:
+   on `PUBLIC_DOMAIN`, `/_matrix/*` is Synapse's.
+4. On a new message Synapse POSTs to ntfy's gateway, ntfy publishes to the topic, the ntfy app
+   hands it to Rumi Messenger, which wakes (even force-stopped: the UnifiedPush connector binds a
+   `RaiseToForegroundService`), fetches the event from Synapse and shows the notification.
+
+**Sygnal is not in this path.** ntfy is both the push server and the Matrix gateway.
+
+### What's deployed (`deploy/docker-compose.yml`, `push` profile)
+
+- `ntfy`: `binwiederhier/ntfy:v2.28.0`, bound `${BIND_ADDR}:${NTFY_PORT:-2586}`, data in the
+  `rumi-ntfy-data` volume. Configured by env, no rendered file:
+  - `NTFY_BASE_URL` (default `https://ntfy.${PUBLIC_DOMAIN}`). **Must equal the URL phones use:**
+    ntfy's gateway rejects any pushkey that doesn't start with `<base-url>/`.
+  - `NTFY_AUTH_DEFAULT_ACCESS=deny-all` + `NTFY_AUTH_ACCESS=*:up*:read-write`: everything is
+    denied except UnifiedPush topics. Anonymous read is the phone's subscription; anonymous write
+    is the gateway publish (and, with the next setting, the subscriber must also have write).
+  - `NTFY_VISITOR_SUBSCRIBER_RATE_LIMITING=true`: every push arrives from one visitor (Synapse),
+    so limits are charged to each subscribing phone instead. Side effect worth knowing: ntfy
+    refuses (HTTP 507) a publish to an `up*` topic that has no live subscriber.
+  - `NTFY_BEHIND_PROXY=true` (Caddy in front). `NTFY_UPSTREAM_BASE_URL` deliberately unset: it
+    only forwards to ntfy.sh -> Firebase/APNs for iOS.
+- Caddy: a second site block `{$NTFY_DOMAIN}` (default `ntfy.${PUBLIC_DOMAIN}`) ->
+  `ntfy:80`. Needs its own DNS A record pointing at the server.
+- `scripts/push-setup.sh` now starts ntfy first (no keys involved), then does the Sygnal/FCM part
+  exactly as before.
+- `scripts/push-check.sh` checks, all falsifiable (stopping ntfy turns all four into FAIL):
+  health, the discovery JSON above, that a non-`up*` publish gets 403, and that a Matrix-gateway
+  publish reaches a live `up*` subscriber. Sygnal checks run only once an FCM pushkin exists.
+
+### The one Synapse catch: pushers can't reach private IPs
+
+Synapse sends pusher traffic through its IP-blocklisted HTTP client, and with no
+`ip_range_blacklist` in `homeserver.yaml` the default list applies: 127/8, 10/8, 172.16/12,
+192.168/16 and friends. Seen live on 2026-09-24:
+
+```
+synapse.http.client  Error sending request to  POST http://127.0.0.1:2586/_matrix/push/v1/notify: SynapseError 403: IP address blocked
+synapse.push.httppusher  Failed to push data to @+923001230095:localhost/im.vector.app.android/http://127.0.0.1:2586/upQx4NtGsI5P9w?up=1: ... 403: IP address blocked
+```
+
+- **Production:** `NTFY_DOMAIN` resolves (from inside the Synapse container too, it isn't a
+  compose alias) to the server's public IP, which isn't blocked. No Synapse change needed. Check
+  once with `docker exec rumi-synapse getent hosts ntfy.<domain>` that it gives the public IP.
+- **A LAN-only or local deployment** needs `ip_range_whitelist: ["<ntfy's IP>/32"]` in
+  `homeserver.yaml` and a Synapse restart. Not applied here: this task was not allowed to restart
+  Synapse. (Locally there's a second problem: `127.0.0.1` inside the Synapse container is Synapse
+  itself, so a local proof also needs a shared address, e.g. `NTFY_BASE_URL=http://<LAN IP>:2586`
+  with ntfy bound to that IP.)
+
+### What the teacher does once
+
+1. Install **ntfy** from F-Droid (or its official release APK,
+   [github.com/binwiederhier/ntfy-android](https://github.com/binwiederhier/ntfy-android/releases),
+   `fdroid-release` build). Allow its notifications, and allow it to run in the background
+   when it asks (battery optimisation off), or Android may kill its connection.
+2. In ntfy: menu -> **Settings** -> **Default server** -> the school's ntfy address
+   (`https://ntfy.<school domain>`) -> **Save**. **Do this before opening Rumi Messenger:** an
+   app that registers first gets a topic on the public `ntfy.sh` and keeps it (seen live: the
+   debug build registered `https://ntfy.sh/up...` and a Synapse pusher pointing at ntfy.sh, which
+   we deleted).
+3. Open Rumi Messenger. With exactly one distributor installed it picks ntfy on its own; the "No
+   distributors available" box is gone. Settings -> Notifications -> Troubleshoot notifications ->
+   Run tests shows "Current push provider: UnifiedPush (io.heckel.ntfy)" and "... is a Matrix
+   gateway".
+
+### Emulator proof (2026-09-24, `emulator-5554`, API 34, released `ai.hellorumi.messenger` v0.1.1)
+
+Setup: `NTFY_BASE_URL=http://127.0.0.1:2586` in `deploy/.env`, `adb reverse tcp:2586 tcp:2586`
+and `tcp:8108`. ntfy `1.25.2` fdroid-release APK from the official repo, SHA-256
+`8a1075c0...9eb53f39` matching GitHub's own asset digest. Evidence in the personal-agent vault,
+`evidence-2026-09-23/push/`.
+
+| Step | Result |
+|---|---|
+| ntfy default server set to `http://127.0.0.1:2586` | screenshot `01` |
+| Rumi Messenger launched as Teacher Zara | no "No distributors available" dialog (`02`); logcat `NtfyUpDistributor: Sending NEW_ENDPOINT ... http://127.0.0.1:2586/upQx4NtGsI5P9w?up=1` |
+| Troubleshoot notifications | provider UnifiedPush (io.heckel.ntfy); `http://127.0.0.1:2586/_matrix/push/v1/notify is a Matrix gateway`; push loop back 120 ms (`04`) |
+| Synapse pusher for Zara | `kind http`, `url http://127.0.0.1:2586/_matrix/push/v1/notify`, `format event_id_only` |
+| App force-stopped (`stopped=true`, no process), Teacher Sana sends a DM | Synapse tried at once: **403 IP address blocked** (above). Not delivered by Synapse. |
+| The same notify body Synapse builds (real event id, Zara's real pushkey and `cs`) POSTed to ntfy's gateway from the host | ntfy `{"rejected":[]}` -> `NtfyUpDistributor: Sending MESSAGE` -> `Start proc ... ai.hellorumi.messenger ... RaiseToForegroundService` -> notification "Teacher Sana: Assalam o alaikum Zara, staff meeting moved to 10am tomorrow." in the shade (`06`) |
+
+So everything from ntfy to the notification shade is proven with the app force-stopped. The one
+hop not proven end to end is Synapse -> ntfy, blocked only by the private-address rule above.
+
+## Sygnal: what it is, and how it's wired here
+
+The Google path only. Not needed for UnifiedPush.
+
+### FCM: what still needs a human, in order (the "three manual steps")
 
 1. **A Firebase project + a service account JSON key.** Firebase console -> create (or reuse) a
    project -> Project Settings -> Service accounts -> "Generate new private key". Save that file
@@ -51,10 +145,9 @@ it**. Concretely:
    with the app closed receives a notification on a real Android phone" (issue #3's own
    done-when) needs a real install, not `adb install` from a dev machine.
 
-None of the three above are done by this PR. What *is* done: the gateway that will use them the
+None of the three are done. What *is* done: the gateway that will use them the
 moment they exist, verified end to end with the honest "no credentials yet" response.
 
-## Sygnal: what it is, and how it's wired here
 
 Sygnal is Matrix's own push gateway (the reference implementation, now maintained at
 [element-hq/sygnal](https://github.com/element-hq/sygnal) -- the older `matrix-org/sygnal` repo
@@ -172,73 +265,6 @@ sygnal`):
 ```bash
 scripts/push-check.sh
 ```
-
-## UnifiedPush: the no-Google path
-
-[UnifiedPush](https://unifiedpush.org/) is a distributor-based push protocol that lets an
-Android app receive push without any dependency on Google Play Services or Firebase. It matters
-here because a school that wants to avoid Google entirely (or just doesn't have a Firebase
-project yet) still has a real, working option today -- not a "someday" placeholder.
-
-**Confirmed: element-x-android supports UnifiedPush upstream, today, with zero Firebase keys.**
-This isn't a feature we'd have to add -- it already exists as its own module in the checkout at
-`/home/oye/Documents/free_work/element-x-android`:
-`libraries/pushproviders/unifiedpush/` (`UnifiedPushProvider.kt`,
-`RegisterUnifiedPushUseCase.kt`, `UnifiedPushGatewayResolver.kt`,
-`troubleshoot/UnifiedPushMatrixGatewayTest.kt`, and more) sits alongside
-`libraries/pushproviders/firebase/` as a peer implementation of the same push-provider interface
--- the app already picks between them (Firebase if Play Services is available and configured,
-UnifiedPush otherwise) via `plugins/src/main/kotlin/config/PushProvidersConfig.kt`. No Firebase
-project, no `google-services.json`, and no code change are needed to use this path.
-
-### What a teacher installs, and what the school runs
-
-- **On the phone:** a UnifiedPush **distributor** app -- the piece that receives pushes from
-  *some* gateway on the device's behalf and hands them to any UnifiedPush-aware app installed,
-  Rumi Messenger included. The standard self-hostable choice, and what a school running its own
-  infrastructure (the same posture as this whole stack) would run, is
-  [ntfy](https://ntfy.sh/) acting as a UnifiedPush distributor -- either the public ntfy.sh
-  service (simplest, no extra hosting) or a self-hosted ntfy instance (consistent with "we run
-  our own homeserver" if a school wants nothing external at all). Other distributors exist
-  (e.g. [Ntfy, UP, or a matrix-hosted one](https://unifiedpush.org/users/distributors/)); ntfy
-  is the one worth naming here because it's the most commonly deployed and has first-class
-  Docker support, matching this repo's own deployment style.
-- **On our side:** nothing new to run for UnifiedPush itself -- unlike Sygnal/FCM, UnifiedPush's
-  push server lives with the *distributor* (ntfy or whatever the teacher's phone uses), not with
-  us. Synapse still needs *a* push gateway URL registered per-pusher, but for UnifiedPush that
-  gateway is resolved dynamically by the app talking to the distributor
-  (`UnifiedPushGatewayResolver.kt`), not a fixed Sygnal-shaped endpoint we operate. This is
-  UnifiedPush's actual advantage here: it needs no Sygnal deployment, no Firebase project, and
-  no server-side change from us at all to work today, in the standard (non-white-label) build.
-
-### The catch: stock Element X ships pointed at Element's own gateway
-
-Here's the dependency issue #3 itself flags, made concrete. `unifiedPushDefaultPushGateway()` in
-`features/enterprise/api/src/main/kotlin/io/element/android/features/enterprise/api/EnterpriseService.kt`
-is the hook a build can use to override which UnifiedPush gateway URL the app defaults to; the
-FOSS implementation
-(`features/enterprise/impl-foss/src/main/kotlin/io/element/android/features/enterprise/impl/DefaultEnterpriseService.kt`)
-returns `null` for it, meaning **the stock/default build falls back to whatever gateway
-element-x-android itself ships pointed at** (Element's own infrastructure, not ours). A teacher
-installing the *unmodified* upstream Element X app and picking UnifiedPush would therefore end
-up routed through Element's gateway, not something we operate or can see traffic for -- it would
-still work (UnifiedPush doesn't require *our* gateway to function), but it's not "our" delivery
-path in any operational sense.
-
-This is exactly why the white-label Android fork (issue #9, already forked to
-`Orenda-Project/rumi-messenger`'s branch of `element-x-android`, `docs/DECISIONS.tsv`
-2026-09-23) is what actually lets us point UnifiedPush at our own choice of gateway (or, for
-Firebase, our own project): overriding `unifiedPushDefaultPushGateway()` (and, for Firebase,
-`firebasePushGateway()`) in that fork's own `EnterpriseService` implementation is a small,
-concrete change once we decide what to point it at -- not a new subsystem, just wiring the hook
-that already exists.
-
-### What we can do today with zero keys vs. what needs a Firebase project
-
-| Path | Needs a Firebase project? | Works today, unmodified upstream code? | What's missing to make it "ours" |
-|---|---|---|---|
-| **UnifiedPush + ntfy** | No | Yes -- module already exists, already wired into the app's push-provider selection | Nothing required for it to *work*; overriding `unifiedPushDefaultPushGateway()` in the fork's `EnterpriseService` is what makes it point at a gateway we choose/operate instead of Element's default |
-| **Firebase (FCM) via Sygnal** | Yes | Yes -- `libraries/pushproviders/firebase/` already exists, but its Gradle plugin is deliberately disabled in the FOSS `app` module until a real `google-services.json` is added | The three manual steps at the top of this doc |
 
 ## Synapse-side config (for the `scripts/setup.sh` owner, not applied by this PR)
 
@@ -387,9 +413,9 @@ cd .. && scripts/e2e.sh                       # confirmed still all passed (15 a
   project was exercised in this task -- confirming "a teacher with the app closed receives a
   notification" (issue #3's own done-when) needs the three manual steps above, then a real
   install, which is out of scope for what can be done "without Firebase or Apple keys".
-- **UnifiedPush end-to-end against ntfy.** The module's existence, wiring, and the
-  `unifiedPushDefaultPushGateway()` hook were confirmed by reading the fork's source directly;
-  an actual UnifiedPush registration/delivery round trip against a running ntfy instance was not
-  exercised (would need an Android device/emulator, out of scope for this doc-and-gateway PR).
+- **UnifiedPush: the Synapse -> ntfy hop.** Everything else was exercised on the emulator on
+  2026-09-24 (see "Emulator proof"). Synapse's own POST was refused by its private-IP blocklist;
+  a real deployment with ntfy on a public hostname, or `ip_range_whitelist` plus a Synapse
+  restart, is what closes it.
 - **Compound/APNs details.** Left commented out and undetailed on purpose -- see "APNs (iOS)"
   above.

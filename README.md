@@ -69,7 +69,7 @@ Tested means we ran it and have the output or the screenshots, not that we expec
 | Rumi's replies verified (no red shield) | **Tested** (`scripts/bot-cross-sign.sh`, [#15](https://github.com/Orenda-Project/rumi-messenger/issues/15)) |
 | 1:1 voice and video calls | **Relay tested on one machine.** Calls across two real networks need a live domain ([#1](https://github.com/Orenda-Project/rumi-messenger/issues/1), [#6](https://github.com/Orenda-Project/rumi-messenger/issues/6)) |
 | Group calls and screen sharing | **Tested** on one machine: two- and three-person video calls and screen share in Element Call ([#2](https://github.com/Orenda-Project/rumi-messenger/issues/2), [CALLING.md](docs/CALLING.md)). Calls between different networks still need a real domain ([#6](https://github.com/Orenda-Project/rumi-messenger/issues/6)) |
-| Phone notifications while the app is closed | **No.** Gateway built, no Firebase key yet ([#3](https://github.com/Orenda-Project/rumi-messenger/issues/3), [PUSH.md](docs/PUSH.md)) |
+| Phone notifications while the app is closed | **Partly.** Self-hosted ntfy (UnifiedPush, no Google) runs under the `push` profile; ntfy-to-notification proven on the emulator with the app force-stopped. Synapse-to-ntfy needs ntfy on a public hostname, not yet seen live ([#3](https://github.com/Orenda-Project/rumi-messenger/issues/3), [PUSH.md](docs/PUSH.md)) |
 | Real domain with HTTPS | **Tested with a self-signed certificate.** Not yet on a real public domain ([#6](https://github.com/Orenda-Project/rumi-messenger/issues/6)) |
 | Backups | **Tested.** Every backup restore-verifies itself (`scripts/backup.sh`) |
 | Federation with other servers | **Off by design** ([#8](https://github.com/Orenda-Project/rumi-messenger/issues/8)) |

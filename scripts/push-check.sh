@@ -59,6 +59,63 @@ print('1' if value in lst else '0')
 }
 
 # ---------------------------------------------------------------------------
+# A. Self-hosted ntfy (UnifiedPush, the no-Google path). Falsifiable end to end on this machine:
+#    health, the exact discovery JSON Element X's UnifiedPushGatewayResolver requires, the
+#    deny-all ACL, and a Matrix-gateway publish that must reach a live subscriber.
+# ---------------------------------------------------------------------------
+NTFY_PORT="${NTFY_PORT:-2586}"
+NTFY_URL="http://${BIND_ADDR}:${NTFY_PORT}"
+NTFY_BASE_URL="${NTFY_BASE_URL:-https://ntfy.${PUBLIC_DOMAIN:-localhost}}"
+
+NTFY_HEALTH="$(curl -s --max-time 5 "${NTFY_URL}/v1/health" 2>/dev/null || true)"
+NH_OK=0; [[ "${NTFY_HEALTH}" == *'"healthy":true'* ]] && NH_OK=1
+check "ntfy GET /v1/health is healthy" "${NH_OK}" "got '${NTFY_HEALTH}' from ${NTFY_URL} -- is it up? (scripts/push-setup.sh)"
+
+DISC="$(curl -s --max-time 5 "${NTFY_URL}/_matrix/push/v1/notify" 2>/dev/null || true)"
+DISC_OK="$(python3 -c "import json,sys
+try: print('1' if json.loads(sys.argv[1])['unifiedpush']['gateway']=='matrix' else '0')
+except Exception: print('0')" "${DISC}")"
+check "GET /_matrix/push/v1/notify returns the UnifiedPush gateway discovery JSON" "${DISC_OK}" "got '${DISC}'"
+
+DENY_HTTP="$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 -d x "${NTFY_URL}/pushcheck-not-up-topic" 2>/dev/null || true)"
+DENY_OK=0; [[ "${DENY_HTTP}" == "403" ]] && DENY_OK=1
+check "non-UnifiedPush topic publish is denied (deny-all ACL)" "${DENY_OK}" "http_code='${DENY_HTTP}', want 403"
+
+# Subscribe to a fresh up* topic, publish a Matrix push-gateway notification whose pushkey is
+# <NTFY_BASE_URL>/<topic> (ntfy rejects any pushkey not prefixed by its base-url), and require
+# the subscriber stream to carry that event id.
+# Exactly "up" + 12 chars: ntfy only applies subscriber-based rate limiting (on in compose) to
+# 14-char up* topics, and with it on, a publish to a topic with no rate visitor gets HTTP 507.
+UP_TOPIC="up$(python3 -c 'import secrets,string;print("".join(secrets.choice(string.ascii_letters+string.digits) for _ in range(12)))')"
+SUB_OUT="$(mktemp)"
+curl -s -N --max-time 8 "${NTFY_URL}/${UP_TOPIC}/json" > "${SUB_OUT}" 2>/dev/null &
+SUB_PID=$!
+sleep 2
+EVT="\$pushcheck$(date +%s)"
+GW_RESP="$(curl -s --max-time 5 -X POST "${NTFY_URL}/_matrix/push/v1/notify" -H 'Content-Type: application/json' \
+  -d "{\"notification\":{\"event_id\":\"${EVT}\",\"room_id\":\"!pushcheck:localhost\",\"counts\":{\"unread\":1},\"devices\":[{\"app_id\":\"push-check\",\"pushkey\":\"${NTFY_BASE_URL}/${UP_TOPIC}?up=1\"}]}}" 2>/dev/null || true)"
+wait "${SUB_PID}" 2>/dev/null
+DELIV_OK=0; grep -q "pushcheck" "${SUB_OUT}" && [[ "${GW_RESP}" == '{"rejected":[]}' ]] && DELIV_OK=1
+check "Matrix gateway publish reaches a live up* subscriber" "${DELIV_OK}" "gateway said '${GW_RESP}'; subscriber saw: $(tr '\n' ' ' < "${SUB_OUT}" | cut -c1-200)"
+rm -f "${SUB_OUT}"
+echo "INFO: this proves ntfy end to end on this box. Synapse must also be able to reach ${NTFY_BASE_URL} at a NON-private IP (Synapse blocks private ranges for pushers by default) -- see docs/PUSH.md."
+
+# ---------------------------------------------------------------------------
+# B. Sygnal (FCM, the Google path) -- only checked once scripts/push-setup.sh configured a
+#    real FCM pushkin. Without one, Sygnal cannot even start (see docs/PUSH.md), so there is
+#    nothing to check and that is not a failure of the no-Google path above.
+# ---------------------------------------------------------------------------
+if ! grep -q 'type: gcm' "${DEPLOY_DIR}/sygnal/sygnal.yaml" 2>/dev/null; then
+  echo "INFO: Sygnal/FCM not configured (no real FCM service account) -- skipping Sygnal checks."
+  echo
+  echo "================================================================"
+  echo " push-check summary: ${PASS_COUNT} passed, ${FAIL_COUNT} failed"
+  echo "================================================================"
+  [[ "${FAIL_COUNT}" -gt 0 ]] && exit 1
+  exit 0
+fi
+
+# ---------------------------------------------------------------------------
 # 1. GET /health
 # ---------------------------------------------------------------------------
 # NOTE: curl's -w '%{http_code}' already prints "000" on a connection failure (exit 7) before

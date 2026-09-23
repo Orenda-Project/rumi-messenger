@@ -67,3 +67,12 @@
 		reverse_proxy element:80
 	}
 }
+
+# Push (issue #3): self-hosted ntfy = UnifiedPush distributor server + Matrix push gateway.
+# Its own hostname because the app discovers the gateway at the endpoint host's root
+# /_matrix/push/v1/notify, which on PUBLIC_DOMAIN is Synapse's. Only answers with the "push"
+# profile up (502 otherwise). Must match NTFY_BASE_URL. See docs/PUSH.md.
+{$NTFY_DOMAIN} {
+	tls {$CADDY_TLS_MODE}
+	reverse_proxy ntfy:80
+}
