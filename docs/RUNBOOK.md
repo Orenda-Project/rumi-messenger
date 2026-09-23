@@ -21,6 +21,25 @@ files are always picked up.
 To stop everything and delete all data, use `scripts/reset.sh` -- it asks you to type `RESET`
 first. There is no undo; take a backup first (below) if you might want the data back.
 
+## Stale devices, and why a teacher's phone can suddenly stop sending
+
+A device that never uploaded encryption keys stays on the account forever: an API login, a
+half-finished sign-in, a browser tab closed mid-way. Once the owner verifies her identity, the app
+refuses to hand room keys to any device she has not signed, so every encrypted send from her new
+phone fails with a red mark and no explanation. We hit exactly this on 23 September, see
+[#14](https://github.com/Orenda-Project/rumi-messenger/issues/14); the app's own log said
+`one or more verified users have unsigned devices`.
+
+```bash
+scripts/devices.sh list  +923360506129          # every device, name, last seen
+scripts/devices.sh prune +923360506129          # remove unnamed devices that never synced; asks first
+scripts/devices.sh prune +923360506129 --yes    # same, unattended
+```
+
+`prune` only touches devices with no display name that have never synced, which is what a keyless
+ghost looks like. A real phone or browser has both and is never removed. Run `list` first if unsure.
+After a prune, the teacher retries the failed message in the app; it goes through without signing in again.
+
 ## Logs
 
 ```bash
