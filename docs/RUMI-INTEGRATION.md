@@ -10,9 +10,11 @@ Setting `MATRIX_HOMESERVER_URL` + `MATRIX_ACCESS_TOKEN` is what turns it on -- t
 
 ## Teachers register with their phone number
 
-A teacher's username on this server must be their phone number in digits, for example
-`923001234567`, with no plus sign, spaces or dashes. The sign-up page says so, and it is not only a
-convention that makes the product feel like WhatsApp.
+A teacher's username on this server must be their phone number in E.164 form, for example
+`+923001234567`: leading plus sign and country code, no spaces or dashes. The plus sign is not
+optional -- Synapse rejects all-digit usernames ("Numeric user IDs are reserved for guest users"),
+while `+923...` is accepted (`scripts/teacher.sh` creates accounts this way). The sign-up page says
+so, and it is not only a convention that makes the product feel like WhatsApp.
 
 Rumi records who asked for a lesson plan, a quiz or a video in columns that were sized for a phone
 number, twenty characters. An additive channel sends a prefixed identity rather than a bare number,
