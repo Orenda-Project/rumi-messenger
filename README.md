@@ -1,9 +1,9 @@
 # Rumi Messenger
 
-A self-hosted, end-to-end encrypted messenger for school teams, with Rumi -- the teaching
-companion -- one tap away for every teacher. It exists because Meta starts billing WhatsApp
-service messages on 1 October 2026: this is what a Rumi deployment moves to instead of paying
-per message.
+A private, end-to-end encrypted messenger for school teams. Teachers chat and call each other,
+and Rumi, the teaching companion, is one tap away, just as on WhatsApp. The school runs it on its
+own server. Meta starts billing WhatsApp service messages on 1 October 2026, and this is what a
+Rumi deployment can move to instead of paying per message.
 
 ## Download the app
 
@@ -11,119 +11,88 @@ per message.
 - **Web:** open your school server's URL in any browser.
 - **iOS:** not available yet.
 
-## Why Matrix, not Signal
+## Start here
 
-Signal's server can't be self-hosted past registration -- contact discovery runs in an Intel SGX
-enclave, and `storage-service`, SVR2, and zkgroup all depend on infrastructure Signal operates
-and doesn't publish. Matrix gives the same shape -- a store-and-forward homeserver that never
-sees plaintext in encrypted rooms, keys held only on clients, multi-device support -- but every
-piece of it is documented and runnable on hardware you control. Full comparison, including what a
-self-hosted Signal-Server would actually be missing: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md#appendix-what-signal-server-would-have-needed).
+| I am... | Read |
+|---|---|
+| **A teacher.** I want to install the app, sign in and talk to Rumi. | [Teacher guide](docs/TEACHER-GUIDE.md) |
+| **The person who runs my school's IT.** I want to set up the server and add teachers. | [Admin guide](docs/ADMIN-GUIDE.md) |
+| **A developer.** I want to know how it works or to contribute. | [Architecture](docs/ARCHITECTURE.md), [Plan](docs/PLAN.md), [Decisions log](docs/DECISIONS.tsv), [Runbook](docs/RUNBOOK.md), [Contributing](CONTRIBUTING.md) |
 
-## Quick start (about 5 minutes)
+## What it is
+
+Rumi Messenger works like WhatsApp for a school. Teachers sign in with their phone number, chat
+and call each other, and Rumi is already there as a contact: they ask for help and get lesson
+ideas, quizzes and coaching the same way they do on WhatsApp. It's end-to-end encrypted, and it
+runs on a server the school controls. Under the hood it's the open [Matrix](https://matrix.org)
+protocol: a Synapse server, the Element apps, and Rumi
+([rumi-platform](https://github.com/Orenda-Project/rumi-platform)) connected as an ordinary account.
+
+**Why Matrix, not Signal:** Signal's server can't be self-hosted past registration. Contact
+discovery depends on an Intel SGX enclave, and its storage services run on infrastructure Signal
+doesn't publish. Matrix gives the same shape: a server that never sees the plaintext of encrypted
+messages, keys kept only on devices, and multiple devices per person. Every piece of it is
+documented and runs on your own hardware.
+[Full comparison](docs/ARCHITECTURE.md#appendix-what-signal-server-would-have-needed).
+
+## Try it in five minutes (for admins and developers)
 
 ```bash
 git clone https://github.com/Orenda-Project/rumi-messenger.git
 cd rumi-messenger
-scripts/setup.sh
+scripts/setup.sh      # needs only Docker (with Compose), curl, python3, openssl
+scripts/e2e.sh        # proves it: real accounts, real messages, one PASS/FAIL line per check
 ```
 
-`setup.sh` needs only Docker (with the Compose plugin), curl, python3, and openssl -- nothing
-else to install first. It brings up Postgres and Synapse, creates an admin account and the
-`@rumi` bot account, creates `#rumi-announcements`, and starts a branded Element Web. It's safe
-to re-run any time -- every step is idempotent.
+`setup.sh` starts the server, the web app and the call relay on `127.0.0.1`. It creates an admin
+account and the `@rumi` account, and prints the web app's address. It's safe to run again. The
+[Admin guide](docs/ADMIN-GUIDE.md) takes you from there to a real school deployment.
 
-When it finishes, it prints something like:
+![A teacher asks Rumi for a fractions idea and Rumi answers, in the Rumi Android app](docs/img/teacher-4-ask-rumi.png)
 
-```
-================================================================
- Rumi Messenger is up
-================================================================
- Element Web:   http://127.0.0.1:8082
- Synapse:       http://127.0.0.1:8008
- Server name:   localhost
+## What works today
 
- Admin account:   admin
-   password (generated, shown once): <a random string -- save it>
- Bot account:     @rumi:localhost (credentials in deploy/rumi-channel.env)
-================================================================
-```
-
-Open the Element Web URL, click **Create Account**, and register a normal user (not the admin
-account -- that's for server administration, see [docs/RUNBOOK.md](docs/RUNBOOK.md)). What you
-should see: you land in `#rumi-announcements`, and within a few seconds `@rumi` opens a direct
-message and says hello. That's the whole loop -- registration, the shared announcements room, and
-Rumi reaching out first -- working end to end on your own machine.
-
-Run `scripts/e2e.sh` any time to verify the stack for yourself instead of taking the above on
-faith -- it registers two throwaway accounts, checks the auto-join, and round-trips a real message
-both between them and with `@rumi`.
-
-### Ports and multiple deployments
-
-The defaults above (`8008`/`8082` internally, `127.0.0.1` only) are fine for one local checkout.
-To change ports, or to run a second, fully independent copy of this stack alongside another
-checkout, export these before your *first* `scripts/setup.sh` run (or set them in `deploy/.env`
-directly -- either way, `setup.sh` is idempotent, so a later change to one of these on a rerun
-just rebinds/renames rather than erroring):
-
-| Variable | What it changes | Default |
-|---|---|---|
-| `SYNAPSE_PORT` | host port Synapse's client-server API binds to | `8008` |
-| `ELEMENT_PORT` | host port Element Web is served on | `8082` |
-| `BIND_ADDR` | address those ports bind to (`0.0.0.0` when fronting with Caddy/TLS) | `127.0.0.1` |
-| `COMPOSE_PROJECT_NAME` | Docker Compose project name -- gives a second checkout its own volumes/network | `rumi-messenger` |
-| `RUMI_CONTAINER_PREFIX` | container name prefix (`<prefix>-postgres`/`-synapse`/`-element`/`-caddy`) -- does not need to match `COMPOSE_PROJECT_NAME` | `rumi` |
-
-Example, a second checkout running side by side with the default one:
-
-```bash
-SYNAPSE_PORT=8208 ELEMENT_PORT=8283 \
-COMPOSE_PROJECT_NAME=verify2 RUMI_CONTAINER_PREFIX=verify2 \
-scripts/setup.sh
-```
-
-## How Rumi connects
-
-The homeserver and Element here don't do any teaching on their own -- `@rumi` is a bot account
-that [rumi-platform](https://github.com/Orenda-Project/rumi-platform) logs into, the same way it
-already logs into Slack and Discord as additional channels alongside WhatsApp. Connecting your
-own rumi-platform deployment to this stack is three commands, covered start to finish in
-[docs/RUMI-INTEGRATION.md](docs/RUMI-INTEGRATION.md).
-
-## Architecture
-
-```
- Teacher (Element Web / Element X / FluffyChat)
-        |  Matrix client-server API, E2EE (Olm/Megolm)
-        v
- Synapse homeserver  --  Postgres            (deploy/docker-compose.yml)
-        ^
-        |  Matrix client-server API, bot account @rumi:<server>
-        v
- rumi-platform  --  CHANNEL matrix (additive, like slack/discord)
-   inbound/matrix-events.adapter.js  -> Meta-webhook-shaped payload -> existing handlers
-   matrix-channel.service.js         <- same method surface as meta-channel.service.js
-   matrix-connection.js              -> one shared matrix-bot-sdk client (+ rust crypto for E2EE)
-```
-
-Full data-flow walkthrough (what happens on a teacher's message, and on Rumi's reply, down to
-which process and which API call): [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
-
-## Features -- honestly, including the gaps
+Tested means we ran it and have the output or the screenshots, not that we expect it to work.
 
 | | Status |
 |---|---|
-| Self-hosted homeserver, your own domain | Yes -- Synapse + Postgres, one command |
-| End-to-end encryption | Yes on the client side (Olm/Megolm), automatic in Element. On the Rumi side, E2EE needs **Node 24+** in rumi-platform (`@matrix-org/matrix-sdk-crypto-nodejs` declares `engines.node: ">=24"` and has no prebuilt binary below that) -- on an older Node, leaving `MATRIX_E2EE` unset auto-downgrades to plaintext with a clear warning instead of crashing; setting it to `on` explicitly makes startup fail loudly instead, so an operator who asked for encryption is never silently handed plaintext. See [docs/RUMI-INTEGRATION.md](docs/RUMI-INTEGRATION.md#3-start-rumi-platform-on-node-24-for-end-to-end-encryption) |
-| 1:1 chat, groups, DMs | Yes -- ordinary Matrix rooms |
-| One-to-one audio and video calls | Yes -- Element's built-in call button, relayed through a `coturn` TURN server so it actually works across two different NATs, not just two browser tabs on the same machine. Ships plaintext (`no-tls`) and loopback-only by default, same as the rest of this stack; real cross-device calling needs the `tls`/production setup (`BIND_ADDR=0.0.0.0`, a real domain, `TURN_EXTERNAL_IP`) covered by issue #6. See [docs/RUNBOOK.md](docs/RUNBOOK.md#calls-11-audiovideo-issue-1). Closes [#1](https://github.com/Orenda-Project/rumi-messenger/issues/1). Group calls/screen sharing are a separate, not-yet-built feature ([#2](https://github.com/Orenda-Project/rumi-messenger/issues/2)) |
-| Rumi as a first-class contact | Yes, two independent paths: server-side, new accounts auto-join `#rumi-announcements` and Rumi DMs them first; client-side, the logged-in home page's primary button is "Talk to Rumi" (see [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md#the-welcome-dm-mechanism) for why this isn't the client-side `welcome_user_id` feature you may have read about -- Element removed it) |
-| Phone-number identity / "find teachers by number" | **No.** Accounts are Matrix user ids, not phone numbers -- there's no contact-discovery-by-phone-number the way WhatsApp has. See [docs/MOBILE.md](docs/MOBILE.md#the-honest-limits) |
-| Mobile apps | No dedicated Rumi app. Element X (iOS/Android) or FluffyChat point at your server and work fully, including talking to Rumi -- see [docs/MOBILE.md](docs/MOBILE.md) |
-| Push notifications on mobile | Needs your own Sygnal instance + FCM/APNs keys, or UnifiedPush -- not built by `setup.sh`. Without it, clients still sync, just not silently in the background. See [docs/MOBILE.md](docs/MOBILE.md#push-notifications) |
-| TLS / a real public domain | Yes -- the `tls` Compose profile fronts everything with Caddy. See [docs/RUNBOOK.md](docs/RUNBOOK.md#moving-to-a-real-domain-tls) |
-| Federation with other Matrix servers | Out of scope for v1 (documented in [docs/PLAN.md](docs/PLAN.md)) -- this is a closed messenger for your own team, not a federated network |
+| One-command server (Synapse, Postgres, branded Element Web) | **Tested.** `scripts/e2e.sh` passes every check |
+| End-to-end encrypted chat | **1:1 chat tested** in the web app and the Android app. Groups are ordinary Matrix rooms, but we haven't tested them separately yet |
+| Rumi as a contact: welcome invitation, questions, quizzes, numbered menus | **Tested** in the web app and the Android app (emulator) |
+| Rumi's media features (coaching, reading assessment, photo lesson plans, voice notes) | **Not tested yet** on this channel. The code path exists in [rumi-platform#104](https://github.com/Orenda-Project/rumi-platform/pull/104) |
+| Lesson plans | **Blocked** on a Gamma API key ([#11](https://github.com/Orenda-Project/rumi-messenger/issues/11)) |
+| Phone number as username, accounts created by the admin | **Tested** (`scripts/teacher.sh`, [#5](https://github.com/Orenda-Project/rumi-messenger/issues/5)). The sign-up page hint is wrong: [#18](https://github.com/Orenda-Project/rumi-messenger/issues/18) |
+| Find colleagues by name | **Tested** ([#10](https://github.com/Orenda-Project/rumi-messenger/issues/10)) |
+| Android app | **Builds, signs in and talks to Rumi on an emulator.** Real phones not tested yet ([#4](https://github.com/Orenda-Project/rumi-messenger/issues/4)); first public release being published ([#9](https://github.com/Orenda-Project/rumi-messenger/issues/9)) |
+| iPhone app | **No.** Use the web app or stock Element X ([#13](https://github.com/Orenda-Project/rumi-messenger/issues/13)) |
+| Adding a second device | **Works** with a recovery key. The warning screen is scary ([#14](https://github.com/Orenda-Project/rumi-messenger/issues/14)); stale devices can block sending, and `scripts/devices.sh` fixes that |
+| Rumi's replies verified (no red shield) | **Tested** (`scripts/bot-cross-sign.sh`, [#15](https://github.com/Orenda-Project/rumi-messenger/issues/15)) |
+| 1:1 voice and video calls | **Relay tested on one machine.** Calls across two real networks need a live domain ([#1](https://github.com/Orenda-Project/rumi-messenger/issues/1), [#6](https://github.com/Orenda-Project/rumi-messenger/issues/6)) |
+| Group calls and screen sharing | **In progress** ([#2](https://github.com/Orenda-Project/rumi-messenger/issues/2), [CALLING.md](docs/CALLING.md)) |
+| Phone notifications while the app is closed | **No.** Gateway built, no Firebase key yet ([#3](https://github.com/Orenda-Project/rumi-messenger/issues/3), [PUSH.md](docs/PUSH.md)) |
+| Real domain with HTTPS | **Tested with a self-signed certificate.** Not yet on a real public domain ([#6](https://github.com/Orenda-Project/rumi-messenger/issues/6)) |
+| Backups | **Tested.** Every backup restore-verifies itself (`scripts/backup.sh`) |
+| Federation with other servers | **Off by design** ([#8](https://github.com/Orenda-Project/rumi-messenger/issues/8)) |
+
+Everything still open: [issues](https://github.com/Orenda-Project/rumi-messenger/issues).
+
+## How Rumi connects
+
+Synapse and Element don't teach anything on their own. `@rumi` is an ordinary account that
+[rumi-platform](https://github.com/Orenda-Project/rumi-platform) signs in to. It is an extra
+channel alongside WhatsApp, Slack and Discord, so Rumi's features are the same everywhere.
+Connecting takes three commands: [docs/RUMI-INTEGRATION.md](docs/RUMI-INTEGRATION.md).
+
+```text
+ Teacher (Rumi Android app / Element Web / Element X)
+        |  Matrix client-server API, end-to-end encrypted
+        v
+ Synapse homeserver  --  Postgres      (+ coturn for calls, Caddy for HTTPS)
+        ^
+        |  same API, bot account @rumi:<server>
+        v
+ rumi-platform  --  Matrix channel, next to WhatsApp / Slack / Discord
+```
 
 ## Built on
 
@@ -168,59 +137,63 @@ pages and logo. Rumi joins over the Matrix protocol as an ordinary account, so n
 repository is copied from anyone else's project. The reasoning, the licences, and the one case where
 a fork would be the right answer are in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
-## What is next
+The one exception is the Android app. That case has now arrived: the app is a Rumi-branded fork of
+[Element X Android](https://github.com/element-hq/element-x-android) (AGPL-3.0), kept at
+[Orenda-Project/element-x-android](https://github.com/Orenda-Project/element-x-android) on the
+`rumi-brand` branch ([#9](https://github.com/Orenda-Project/rumi-messenger/issues/9)).
 
-Everything still open is tracked as an issue. The short version:
+## Ports and multiple deployments
 
-| | Issue |
-|---|---|
-| Push notifications on phones | [#3](https://github.com/Orenda-Project/rumi-messenger/issues/3) |
-| Test on real phones, teacher setup guide | [#4](https://github.com/Orenda-Project/rumi-messenger/issues/4) |
-| Production hardening: domain, certificates, backups | [#6](https://github.com/Orenda-Project/rumi-messenger/issues/6) |
-| One-to-one audio and video calls | [#1](https://github.com/Orenda-Project/rumi-messenger/issues/1) |
-| Group calls and screen sharing | [#2](https://github.com/Orenda-Project/rumi-messenger/issues/2) |
-| Let teachers find each other | [#10](https://github.com/Orenda-Project/rumi-messenger/issues/10) |
-| Sign up with a phone number | [#5](https://github.com/Orenda-Project/rumi-messenger/issues/5) |
-| Re-check the theme before bumping Element | [#7](https://github.com/Orenda-Project/rumi-messenger/issues/7) |
-| Decide federation and retention | [#8](https://github.com/Orenda-Project/rumi-messenger/issues/8) |
-| Rumi-branded phone app | [#9](https://github.com/Orenda-Project/rumi-messenger/issues/9) |
+The defaults above (`8008`/`8082` internally, `127.0.0.1` only) are fine for one local checkout.
+To change ports, or to run a second, fully independent copy of this stack alongside another
+checkout, export these before your *first* `scripts/setup.sh` run (or set them in `deploy/.env`
+directly -- either way, `setup.sh` is idempotent, so a later change to one of these on a rerun
+just rebinds/renames rather than erroring):
 
-On the Rumi side: the channel itself is [rumi-platform#104](https://github.com/Orenda-Project/rumi-platform/pull/104), tracked by [#106](https://github.com/Orenda-Project/rumi-platform/issues/106), and the hardcoded chat model is [#105](https://github.com/Orenda-Project/rumi-platform/issues/105).
+| Variable | What it changes | Default |
+|---|---|---|
+| `SYNAPSE_PORT` | host port Synapse's client-server API binds to | `8008` |
+| `ELEMENT_PORT` | host port Element Web is served on | `8082` |
+| `BIND_ADDR` | address those ports bind to (`0.0.0.0` when fronting with Caddy/TLS) | `127.0.0.1` |
+| `COMPOSE_PROJECT_NAME` | Docker Compose project name -- gives a second checkout its own volumes/network | `rumi-messenger` |
+| `RUMI_CONTAINER_PREFIX` | container name prefix (`<prefix>-postgres`/`-synapse`/`-element`/`-caddy`) -- does not need to match `COMPOSE_PROJECT_NAME` | `rumi` |
+
+Example, a second checkout running side by side with the default one:
+
+```bash
+SYNAPSE_PORT=8208 ELEMENT_PORT=8283 \
+COMPOSE_PROJECT_NAME=verify2 RUMI_CONTAINER_PREFIX=verify2 \
+scripts/setup.sh
+```
 
 ## Repo map
 
-```
+```text
 rumi-messenger/
-├── deploy/                  # The stack: Compose file, Synapse data dir, Element config/branding, Caddy
-│   ├── docker-compose.yml   # postgres + synapse + element (+ optional caddy under the "tls" profile)
-│   ├── .env.example         # every setting setup.sh reads/generates, documented inline
-│   ├── element/             # config.template.json + welcome.template.html/home.template.html (rendered by setup.sh), brand assets
-│   └── synapse/data/        # homeserver.yaml, signing key, media store -- generated, gitignored, chmod 600
+├── deploy/        # docker-compose.yml, .env.example (every setting), Element branding, Caddyfile
 ├── scripts/
-│   ├── setup.sh             # one-command bring-up, idempotent
-│   ├── e2e.sh               # end-to-end verification -- registers real accounts, round-trips real messages
-│   ├── logs.sh               # tail one or all services
-│   ├── backup.sh             # pg_dump + media_store archive
-│   ├── reset.sh               # destroys the local stack (typed confirmation required)
-│   └── connect-rumi.sh       # wires deploy/rumi-channel.env into a rumi-platform checkout's .env
+│   ├── setup.sh             # one-command bring-up, idempotent, no flags (configure via deploy/.env)
+│   ├── e2e.sh               # end-to-end verification
+│   ├── teacher.sh           # add a teacher: phone number + real name
+│   ├── devices.sh           # list / prune a user's stale devices
+│   ├── connect-rumi.sh      # copy @rumi's credentials into a rumi-platform checkout
+│   ├── bot-cross-sign.sh    # verify Rumi's device (removes the red shield)
+│   ├── backup.sh            # Postgres + media + signing key, restore-verified
+│   ├── prod-check.sh        # is the live server actually hardened?
+│   ├── push-setup.sh / push-check.sh   # Sygnal push gateway
+│   ├── calls-check.sh       # group-calls health check
+│   ├── theme-guard.sh       # Rumi colours still applied after an Element bump
+│   ├── check-upstream-releases.sh      # weekly: files an issue per outdated pinned image
+│   ├── logs.sh              # tail one or all services
+│   └── reset.sh             # delete everything (asks you to type RESET)
 └── docs/
-    ├── PLAN.md               # the original build plan
-    ├── DECISIONS.tsv         # append-only decision log (ts, phase, decision, why, evidence, result)
-    ├── ARCHITECTURE.md        # components, data flow, identity format, scaling notes
-    ├── RUNBOOK.md             # day-2 ops: start/stop, backup/restore, upgrades, registration, users, rate limits
-    ├── LOGGING.md             # every log surface, what's deliberately not logged, correlation
-    ├── RUMI-INTEGRATION.md    # connecting a rumi-platform deployment, step by step
-    └── MOBILE.md              # Element X / FluffyChat, push notifications, honest limits
+    ├── TEACHER-GUIDE.md  ADMIN-GUIDE.md        # start here
+    ├── RUNBOOK.md                               # every operation, in detail
+    ├── ARCHITECTURE.md  PLAN.md  DECISIONS.tsv  # how and why
+    ├── RUMI-INTEGRATION.md  MOBILE.md  PUSH.md  CALLING.md
+    ├── IDENTITY-MODEL.md  FEDERATION-RETENTION.md  LOGGING.md
+    └── img/                                     # screenshots used by the guides
 ```
-
-## Logging
-
-Every container logs JSON (or, for Element's static file server, plain nginx access lines) to
-`docker logs` -- there's no separate log file anywhere in `deploy/`. `scripts/logs.sh` tails one
-service or all of them. On the rumi-platform side, every Matrix send and receive logs one
-structured line with `channel`/`direction`/`roomId`/`eventId`/`type` and never a message body or a
-token. Full reference, including what a healthy line looks like and how to correlate a message
-across both systems: [docs/LOGGING.md](docs/LOGGING.md).
 
 ## License
 
