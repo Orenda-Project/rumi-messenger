@@ -74,16 +74,19 @@ nothing to install.
 
    Always type the `https://` or `http://` part, exactly as your admin wrote it. If you forgot it
    and the app just shows a spinner, go back and type the address again with it.
-3. Tap **Continue**. The next screen says "You're about to sign in to" and shows your server's
-   address.
+3. Tap **Continue**. The app checks the address, which can take up to a minute and a half with
+   a spinner -- that's normal, wait for it. The next screen says "You're about to sign in to" and
+   shows your server's address.
 4. Type your **username** (`+923001234567`) and your **password**, then tap **Continue**.
 
    ![Sign in with username and password](img/teacher-2-sign-in.png)
 
    (This picture was taken on a test server. Yours shows your school's address.)
 
-5. The app may ask about notifications and about sharing usage data. You can say yes or no to
-   either one. Rumi works the same way whatever you choose.
+5. The app may ask about notifications. You can say yes or no. Rumi works the same way whatever
+   you choose. If a box appears saying "No distributors available", tap OK and carry on: it only
+   means the phone has no service to deliver notifications while the app is closed. Messages
+   still arrive whenever the app is open.
 
 ### In the web app
 
@@ -101,7 +104,9 @@ called **Rumi Announcements**, where your school shares updates.
    ![Accept Rumi's invitation](img/teacher-3-accept-rumi.png)
 
 2. Rumi says hello: *"Hi, we're glad you're here. This is your space with Rumi. Ask us anything
-   about your class, your lessons, or your day. You're not teaching alone."*
+   about your class, your lessons, or your day. You're not teaching alone."* If that first
+   message shows as "Waiting for this message" instead, don't worry: it was sent before your
+   phone existed. Just type your question; Rumi's reply to you will read normally.
 3. Type your question and send it. Replies usually arrive within about 15 seconds.
 
 In the web app, you can also click **Talk to Rumi** on the home page at any time.
@@ -145,7 +150,8 @@ quizzes are the parts we've tested in this app so far.
 ## 6. Chat and call your colleagues
 
 **Start a chat.** Tap **+** (Android) or **Start chat** (web). Then, under **Search for someone**, type the first letters of a
-colleague's name, for example `Ay` for Ayesha Khan. Pick them from the list. The search matches
+colleague's name, for example `Ay` for Ayesha Khan. Pick them from the list, then tap **Send
+invite** on the "Send invite?" box that appears; the chat opens after that. The search matches
 the start of each word in a name, so `Kha` finds "Ayesha Khan" but `yesha` doesn't.
 
 **Make a group.** Tap **+** and choose **New room**. Give it a name, such as "Grade 4 teachers",
