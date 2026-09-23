@@ -127,7 +127,10 @@ homeserver to save infra cost -- at that point teachers from School A could sear
 teachers at School B, which is very likely not what either school agreed to. If that ever happens,
 do NOT leave `search_all_users: true` as-is; the two real options are (a) keep one Synapse instance
 per school (simplest, what this stack assumes today), or (b) if a genuinely shared multi-tenant
-server is required, set `search_all_users: false` and give each school its own
+server is required, set `search_all_users: false`, stop auto-joining every account into the single shared `#rumi-announcements`
+(one announcements room per school instead; today's shared room alone makes every account discoverable to
+every other regardless of the flag, which a reviewer proved by disabling the flag and watching search still
+succeed), and give each school its own
 [Space](https://element-hq.github.io/synapse/latest/user_directory.html) so cross-school search
 results are suppressed the same way room-shared/public-room visibility already limits them when
 this flag is off. This repo does not implement (b) -- it isn't needed yet, and building it before a

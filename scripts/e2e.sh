@@ -404,11 +404,32 @@ if [[ "${REGISTER_OK}" == "1" ]]; then
   #          below) for exactly that reason; do not "simplify" it back to a mid-word substring.
   #    Both poll (bounded, 1s steps) rather than checking once immediately -- the directory can
   #    lag a live profile-name update by a moment, and a flaky one-shot check would be a false
-  #    FAIL, not a real bug. TOKEN_B does the searching (not A) so this also incidentally proves
-  #    search_all_users is really "all users", not just "users I already share a room with" --
-  #    A and B share the #rumi-announcements auto-join room, so a same-room search back could
-  #    otherwise pass even with search_all_users left off.
+  #    FAIL, not a real bug.
+  #    The searcher is a THIRD throwaway user, C, who first LEAVES #rumi-announcements. Without
+  #    that, C (or B) would share the auto-join room with A, and Synapse returns shared-room users
+  #    even with search_all_users off -- a reviewer proved the earlier version of this check passed
+  #    with the flag disabled. Once C shares no room with A, the only way this search can succeed
+  #    is search_all_users doing its job, so the check now fails when the flag is off.
   # -------------------------------------------------------------------------
+  USER_C="e2e-${EPOCH}-c"
+  RESP_C="$(register_via_secret "${USER_C}" "${PASSWORD}" notadmin)"
+  TOKEN_C="$(json_field "${RESP_C}" access_token)"
+  CLEANUP_USERS+=("${USER_C}")
+  if [[ -n "${TOKEN_C}" && -n "${ANNOUNCE_ROOM_ID:-}" ]]; then
+    for attempt in $(seq 1 10); do   # auto-join is async; wait until C is in, then leave
+      C_ROOMS="$(mxc_call GET "${TOKEN_C}" "/_matrix/client/v3/joined_rooms" "")"
+      if python3 -c "import json,sys; sys.exit(0 if sys.argv[2] in json.loads(sys.argv[1]).get('joined_rooms',[]) else 1)" "${C_ROOMS}" "${ANNOUNCE_ROOM_ID}" 2>/dev/null; then break; fi
+      sleep 1
+    done
+    ROOM_ENC="$(python3 -c 'import sys,urllib.parse;print(urllib.parse.quote(sys.argv[1],safe=""))' "${ANNOUNCE_ROOM_ID}")"
+    mxc_call POST "${TOKEN_C}" "/_matrix/client/v3/rooms/${ROOM_ENC}/leave" "{}" >/dev/null
+    # A leaves too: #rumi-announcements is PUBLIC, and Synapse lists members of public rooms in
+    # the directory for everyone even with search_all_users off. With A in no public room and
+    # sharing nothing with C, only search_all_users can make A findable. (Verified: with only C
+    # leaving, the checks still passed with the flag off.) All earlier checks that need A in the
+    # room have already run at this point.
+    mxc_call POST "${TOKEN_A}" "/_matrix/client/v3/rooms/${ROOM_ENC}/leave" "{}" >/dev/null
+  fi
   USER_A_MXID="@${USER_A}:${SERVER_NAME}"
   DISPLAY_FIRST="Ee2eFind${EPOCH}"
   DISPLAY_NAME="${DISPLAY_FIRST} Teacher"
@@ -429,11 +450,11 @@ if [[ "${REGISTER_OK}" == "1" ]]; then
     echo "0"
   }
 
-  FULL_NAME_SEARCH_OK="$(poll_user_directory_search "${TOKEN_B}" "${DISPLAY_FIRST}" "${USER_A_MXID}")"
-  check "user_directory/search by full first name finds a user created seconds ago (within 10s)" "${FULL_NAME_SEARCH_OK}" \
+  FULL_NAME_SEARCH_OK="$(poll_user_directory_search "${TOKEN_C}" "${DISPLAY_FIRST}" "${USER_A_MXID}")"
+  check "user_directory/search by full first name finds a user who shares NO room with the searcher (proves search_all_users)" "${FULL_NAME_SEARCH_OK}" \
     "search_term='${DISPLAY_FIRST}' target='${USER_A_MXID}'"
 
-  PARTIAL_NAME_SEARCH_OK="$(poll_user_directory_search "${TOKEN_B}" "Tea" "${USER_A_MXID}")"
+  PARTIAL_NAME_SEARCH_OK="$(poll_user_directory_search "${TOKEN_C}" "Tea" "${USER_A_MXID}")"
   check "user_directory/search by partial (word-prefix) display name finds the same user" "${PARTIAL_NAME_SEARCH_OK}" \
     "search_term='Tea' target='${USER_A_MXID}'"
 
@@ -443,7 +464,7 @@ else
   check "A -> @rumi DM message lands in room" 0 "skipped: user registration failed"
   check "GET /_matrix/client/v3/voip/turnServer returns TURN credentials (Synapse-side config only -- does NOT prove coturn is up, see next check)" 0 "skipped: user registration failed"
   check "coturn is alive and honors the Synapse-issued TURN credentials (docker exec turnutils_uclient ALLOCATE)" 0 "skipped: user registration failed"
-  check "user_directory/search by full first name finds a user created seconds ago (within 10s)" 0 "skipped: user registration failed"
+  check "user_directory/search by full first name finds a user who shares NO room with the searcher (proves search_all_users)" 0 "skipped: user registration failed"
   check "user_directory/search by partial (word-prefix) display name finds the same user" 0 "skipped: user registration failed"
 fi
 

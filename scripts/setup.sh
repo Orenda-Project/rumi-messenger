@@ -530,15 +530,32 @@ if [[ ! -f "${USER_DIR_REINDEX_MARKER}" ]]; then
   log "  user_directory: triggering one-time regenerate_directory reindex"
   REINDEX_LOGIN_JSON="$(login_user "${ADMIN_USER}" "${ADMIN_PASSWORD}")"
   REINDEX_ADMIN_TOKEN="$(python3 -c "import json,sys; print(json.loads(sys.argv[1])['access_token'])" "${REINDEX_LOGIN_JSON}")"
-  curl -fsS -X POST "http://${BIND_ADDR}:${SYNAPSE_PORT}/_synapse/admin/v1/background_updates/start_job" \
-    -H "Authorization: Bearer ${REINDEX_ADMIN_TOKEN}" -H "Content-Type: application/json" \
-    -d '{"job_name":"regenerate_directory"}' >/dev/null
+  # On a genuinely fresh install Synapse is still running its own schema background updates
+  # for a minute or two after first boot, and the admin API answers 400 to start_job until they
+  # finish. That is not an error worth aborting setup over (it did, once, and killed the rest of
+  # this script mid-run), so: retry with backoff for up to ~2 min, and if it still refuses, say
+  # so plainly, leave the marker unwritten, and carry on. The next run retries; search still works
+  # for users who share a room in the meantime.
+  REINDEX_OK=0
+  for attempt in 1 2 3 4 5 6 7 8; do
+    code="$(curl -sS -o /dev/null -w '%{http_code}' -X POST "http://${BIND_ADDR}:${SYNAPSE_PORT}/_synapse/admin/v1/background_updates/start_job" \
+      -H "Authorization: Bearer ${REINDEX_ADMIN_TOKEN}" -H "Content-Type: application/json" \
+      -d '{"job_name":"regenerate_directory"}' || true)"
+    if [[ "${code}" == "200" ]]; then REINDEX_OK=1; break; fi
+    log "  regenerate_directory not accepted yet (HTTP ${code:-000}), Synapse still finishing its own startup updates; retry ${attempt}/8 in 15s"
+    sleep 15
+  done
+  if [[ "${REINDEX_OK}" != "1" ]]; then
+    log "  WARNING: could not start the regenerate_directory job after 2 min; setup continues. Re-run scripts/setup.sh later to retry (search already works for users who share a room)."
+  fi
   # /data is owned by uid/gid 991 inside the container (same as homeserver.yaml, Step 3) -- the
   # host user can't create a file there directly, but `dc run`/`exec` against this image runs as
   # root, so write the marker from inside it, same fix as everywhere else in this script that
   # touches /data.
-  dc run --rm --entrypoint sh synapse -c "touch /data/.user_directory_reindexed" >/dev/null
-  log "  regenerate_directory job started (async -- see docs/RUNBOOK.md to check progress)"
+  if [[ "${REINDEX_OK}" == "1" ]]; then
+    dc run --rm --entrypoint sh synapse -c "touch /data/.user_directory_reindexed" >/dev/null
+    log "  regenerate_directory job started (async -- see docs/RUNBOOK.md to check progress)"
+  fi
 else
   log "  user_directory already reindexed once, skipping (rm ${USER_DIR_REINDEX_MARKER} to force)"
 fi
