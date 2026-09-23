@@ -202,7 +202,7 @@ most problems happen, so follow these steps in this order:
 1. **Keep your first device open and signed in.**
 2. Sign in on the new device ([section 3](#3-sign-in)).
 3. The new device shows **Confirm it's you**. Choose one of these:
-   - **Approve on my other phone or computer**: your first device shows a prompt. Approve it there.
+   - **Approve on my other phone**: your first phone or computer shows a prompt. Approve it there.
    - **Enter my backup code**: type the code from [section 7](#7-save-your-backup-code-do-this-on-day-one).
 4. When the new device says it's confirmed, you're done. Your old messages appear on it.
 
