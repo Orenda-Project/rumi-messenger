@@ -418,6 +418,21 @@ your phone's mobile data with WiFi off, not two devices on the same router):
    the call connects (a connected-but-silent call is the exact symptom of the "UDP blocked"
    failure mode described above).
 
+## Group calls + screen sharing (issue #2)
+
+Full picture (architecture, known gaps, capacity story, the "SERVER_NAME can't literally be
+`localhost`" local-testing gotcha) is in `docs/CALLING.md`. Short version:
+
+```bash
+docker compose --profile calls --profile prod up -d livekit lk-jwt-service caddy
+scripts/calls-check.sh
+```
+
+`calls` alone starts the LiveKit SFU + lk-jwt-service; a client can only *discover* them once
+`prod`/`tls` is also up (the MatrixRTC backend is advertised via Caddy's
+`.well-known/matrix/client`, since our pinned Synapse does not serve MSC4143 natively). Same
+"needs a real domain" dependency issue #2 itself names against issue #6.
+
 ## Registration modes
 
 Set in `deploy/.env` (`REGISTRATION_MODE`), applied by `scripts/setup.sh` step 3:
@@ -615,6 +630,10 @@ domain/server, and can't be faked from this machine:
   teachers.
 - Deciding and setting real media retention (see "Media retention" above) and a disk-size budget
   once real upload volume exists.
+- Group calls (issue #2): the `calls` profile itself is proven (backend chain verified end to end,
+  one real browser participant streams real media into a LiveKit room) -- but a second real
+  participant's connection was NOT proven in the automated run (see `docs/CALLING.md`'s "Known
+  gaps" #6). Do a real two-person manual test before relying on this for a staff meeting.
 
 ### DNS records to create
 

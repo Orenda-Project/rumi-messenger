@@ -180,6 +180,120 @@ services:
       retries: 10
       start_period: 10s
 
+  # Group calls + screen sharing (issue #2). LiveKit is the SFU that mixes/forwards media for
+  # 3+ participants (1:1 calls stay peer-to-peer via coturn above, issue #1); lk-jwt-service is
+  # the bridge Element Web's built-in Element Call widget talks to for a signed LiveKit token,
+  # per MSC4195. Behind the "calls" compose profile, same off-by-default posture as
+  # "push"/"tls"/"prod" -- `docker compose --profile calls up -d` opts in on its own; combine
+  # with `--profile prod` (or `tls`) for a client to actually be able to DISCOVER these services
+  # (see the Caddyfile's org.matrix.msc4143.rtc_foci well-known entry and docs/CALLING.md) --
+  # our pinned Synapse 1.161.0 does not serve MSC4143 natively (verified live: `/versions`
+  # reports `"org.matrix.msc4143": false`, no such REST module exists in the image), so
+  # well-known via Caddy is the only discovery path this stack has. Config is rendered by
+  # scripts/setup.sh into deploy/livekit/livekit.yaml (gitignored), same pattern as coturn's
+  # turnserver.conf.
+  livekit:
+    # Pinned to the exact version resolved from :latest on 2026-09-23 (livekit/livekit-server
+    # 1.13.7). To upgrade: check https://github.com/livekit/livekit/releases, bump this tag, then
+    # `docker compose pull && docker compose --profile calls up -d livekit`.
+    image: livekit/livekit-server:v1.13.7
+    container_name: ${RUMI_CONTAINER_PREFIX:-rumi}-livekit
+    restart: unless-stopped
+    logging: *default-logging
+    profiles: ["calls"]
+    command: ["--config", "/etc/livekit.yaml"]
+    volumes:
+      - ./livekit/livekit.yaml:/etc/livekit.yaml:ro
+    ports:
+      # Signalling (WS/HTTP) + TCP media fallback, bound like every other service here (off the
+      # network by default via BIND_ADDR). The UDP range is the actual per-participant call
+      # media -- kept to 100 ports (50100-50200, LiveKit's own docs-sample default) rather than
+      # coturn's ~16k so bridge port-range publishing (Docker's documented weak point at wide
+      # ranges -- see coturn's comment above) stays reasonable; this is deliberately smaller than
+      # a large multi-hundred-participant production deployment would need, see docs/CALLING.md
+      # for the capacity story issue #2 asked for.
+      - "${BIND_ADDR:-127.0.0.1}:${LIVEKIT_PORT:-7880}:7880"
+      - "${BIND_ADDR:-127.0.0.1}:${LIVEKIT_RTC_TCP_PORT:-7881}:7881"
+      - "${BIND_ADDR:-127.0.0.1}:${LIVEKIT_RTC_UDP_MIN:-50100}-${LIVEKIT_RTC_UDP_MAX:-50200}:${LIVEKIT_RTC_UDP_MIN:-50100}-${LIVEKIT_RTC_UDP_MAX:-50200}/udp"
+    healthcheck:
+      # LiveKit answers a plain 200 OK on / with no auth needed (its own documented healthcheck).
+      # Checked against the container's OWN internal port (always 7880, set by livekit.yaml's
+      # "port:" key -- LIVEKIT_PORT only changes the HOST side of the port mapping above), not
+      # ${LIVEKIT_PORT}, which would break this check the moment someone remaps the host port.
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:7880/"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+
+  lk-jwt-service:
+    # Pinned by digest, not tag: element-hq/lk-jwt-service's GitHub release is tagged v0.7.0, but
+    # ghcr.io/element-hq/lk-jwt-service publishes no matching "v0.7.0" (or any other semver) image
+    # tag -- only `latest`, `latest-ci`, and `sha-<commit>` (verified live against the registry's
+    # own tag list 2026-09-23). This digest is what `latest` resolved to that day. To upgrade:
+    # `docker pull ghcr.io/element-hq/lk-jwt-service:latest`, note its new digest, bump this line.
+    image: ghcr.io/element-hq/lk-jwt-service@sha256:e0c7cecfa74e2342a3e79d47e1d4ab4bd228fe05b1a4dc4ba7f807686b0c214b
+    container_name: ${RUMI_CONTAINER_PREFIX:-rumi}-lk-jwt-service
+    restart: unless-stopped
+    logging: *default-logging
+    profiles: ["calls"]
+    depends_on:
+      livekit:
+        condition: service_healthy
+    environment:
+      # Standalone mode (not the application-service/MSC4512 proxy mode -- that mode needs
+      # Synapse's `develop` branch per element-hq/element-call's own dev-compose, not our pinned
+      # stable v1.161.0). Standalone is the "deprecated but still supported" MSC4195 flow this
+      # service's own README documents: clients present an OpenID token from Synapse straight to
+      # this service, which verifies it against LIVEKIT_CS_API_URL_OVERRIDES below. See
+      # docs/DECISIONS.tsv.
+      #
+      # This is the URL BOTH the browser (Element Call widget, for the actual call
+      # media/signalling) AND this service's OWN outbound room-management calls use -- it is
+      # baked into the LiveKit JWT this service mints, not just an internal address. Routed
+      # through Caddy's `/livekit/sfu/*` proxy (Caddyfile) rather than straight at
+      # `livekit:7880`/a raw host port, for two reasons: (1) it gets a real wss:// connection
+      # through Caddy's TLS cert for the browser, no plaintext-port/mixed-content workaround
+      # needed; (2) it's the only address this container can reach "PUBLIC_DOMAIN" at all from
+      # inside its own network namespace (see the "localhost server_name" gap in
+      # docs/CALLING.md) -- verified live, pointing this at the host-mapped LIVEKIT_PORT instead
+      # produced "tcp connect error: Connection refused" from inside this container. Needs the
+      # `prod`/`tls` profile up, same as the well-known discovery path.
+      LIVEKIT_URL: "wss://${PUBLIC_DOMAIN:-localhost}/livekit/sfu"
+      LIVEKIT_KEY: "${LIVEKIT_API_KEY}"
+      LIVEKIT_SECRET: "${LIVEKIT_API_SECRET}"
+      LIVEKIT_JWT_BIND: ":8080"
+      # This deployment's own server_name is always full-access (it's the only homeserver in the
+      # picture -- federation is off, issue #8) so any locally-authenticated teacher can trigger
+      # LiveKit room creation for a new group call.
+      LIVEKIT_FULL_ACCESS_HOMESERVERS: "${SERVER_NAME:-localhost}"
+      # Neither this stack's Synapse nor Caddy serve `.well-known/matrix/client` from the
+      # SERVER_NAME's own origin without the `prod`/`tls` profile also running, and even then
+      # that's the CLIENT's discovery path, not this service's own outbound lookup -- this var is
+      # this service's own C-S API address for verifying a presented OpenID token, so it's always
+      # set explicitly rather than relying on discovery, same as element-call's own dev-compose.
+      LIVEKIT_CS_API_URL_OVERRIDES: "${SERVER_NAME:-localhost}=http://synapse:8008"
+      LIVEKIT_LOG_LEVEL: "info"
+      # Empty/unset by default (real TLS verification stays ON). ONLY set
+      # LIVEKIT_INSECURE_SKIP_VERIFY_TLS=YES_I_KNOW_WHAT_I_AM_DOING in deploy/.env for a LOCAL
+      # proof against Caddy's `CADDY_TLS_MODE=internal` self-signed cert -- lk-jwt-service verifies
+      # a client's OpenID token by calling back to Caddy over HTTPS (see docs/CALLING.md), and
+      # Caddy's internal-CA cert is not in lk-jwt-service's trust store. A real deployment with a
+      # real Let's Encrypt cert (issue #6's `prod` profile, `CADDY_TLS_MODE` blank) never needs
+      # this -- verified live: without it, the local self-signed proof fails with
+      # "UnknownIssuer" before it ever reaches the actual auth logic. Named after
+      # element-hq/element-call's own dev-compose, which sets this exact var for this exact
+      # reason.
+      LIVEKIT_INSECURE_SKIP_VERIFY_TLS: "${LIVEKIT_INSECURE_SKIP_VERIFY_TLS:-}"
+    ports:
+      - "${BIND_ADDR:-127.0.0.1}:${LIVEKIT_JWT_PORT:-8180}:8080"
+    # No Docker HEALTHCHECK here: the image is a single static, shell-less Rust binary (no
+    # wget/curl/sh at all -- verified live, `docker exec` of any of them fails with "executable
+    # file not found in $PATH"), so a CMD-based healthcheck cannot run inside the container.
+    # scripts/calls-check.sh checks GET /healthz from the host (mapped port) instead -- verified
+    # live to return 200, unlike /health (404) which the upstream README does not actually
+    # document as a real route.
+
   # Optional TLS/reverse-proxy front door for a real domain (issue #6, production hardening).
   # Not started by default -- `docker compose --profile prod up -d` (or the older alias
   # `--profile tls`, kept for back-compat) brings it up. See deploy/Caddyfile.
@@ -210,6 +324,21 @@ services:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
       - rumi-caddy-data:/data
       - rumi-caddy-config:/config
+    networks:
+      default:
+        # Makes PUBLIC_DOMAIN resolve, from INSIDE this compose network, to this container --
+        # not just from the host/internet the way its published 80/443 ports already do. Needed
+        # by lk-jwt-service (issue #2, group calls): it verifies a client's OpenID token by
+        # resolving PUBLIC_DOMAIN's federation base URL via HTTPS .well-known/matrix/server
+        # delegation, from inside its OWN container -- without this alias that resolution hits
+        # whatever "PUBLIC_DOMAIN" already means inside lk-jwt-service's network namespace
+        # instead of this stack's Caddy, which for the literal value "localhost" is lk-jwt-service
+        # itself (glibc resolves "localhost" via /etc/hosts before any DNS/alias lookup is even
+        # tried, so this alias is a harmless no-op for that specific value, verified live -- see
+        # docs/CALLING.md for why local testing needs a real hostname like "rumi.calls.test"
+        # instead of literal "localhost" for this reason, and docs/DECISIONS.tsv).
+        aliases:
+          - ${PUBLIC_DOMAIN:-localhost}
 
 volumes:
   rumi-postgres-data:

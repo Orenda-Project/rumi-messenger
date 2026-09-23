@@ -27,7 +27,31 @@
 	handle /.well-known/matrix/client {
 		header Content-Type application/json
 		header Access-Control-Allow-Origin *
-		respond `{"m.homeserver": {"base_url": "https://{$PUBLIC_DOMAIN}"}, "m.identity_server": {"base_url": "https://vector.im"}}` 200
+		# org.matrix.msc4143.rtc_foci (issue #2, group calls): this is the ONLY place a client can
+		# discover the LiveKit/lk-jwt-service backend rendered by scripts/setup.sh -- our pinned
+		# Synapse 1.161.0 does not serve MSC4143 natively (verified live: /versions reports
+		# "org.matrix.msc4143": false). livekit_service_url points at this same Caddy instance's
+		# own /livekit/jwt path (handled below), not lk-jwt-service directly, so it always shares
+		# PUBLIC_DOMAIN's TLS cert -- see docs/CALLING.md.
+		respond `{"m.homeserver": {"base_url": "https://{$PUBLIC_DOMAIN}"}, "m.identity_server": {"base_url": "https://vector.im"}, "org.matrix.msc4143.rtc_foci": [{"type": "livekit", "livekit_service_url": "https://{$PUBLIC_DOMAIN}/livekit/jwt"}]}` 200
+	}
+
+	# Group calls (issue #2): proxies to lk-jwt-service, prefix stripped (lk-jwt-service's own
+	# routes -- /sfu/get, /sfu_webhook, etc -- live at its root). Only reachable when the "calls"
+	# profile is also up; with it down this 502s, which docs/CALLING.md documents as the expected
+	# failure mode rather than a silent gap.
+	handle_path /livekit/jwt/* {
+		reverse_proxy lk-jwt-service:8080
+	}
+
+	# LiveKit SFU signalling (issue #2), proxied so the browser gets a real wss:// connection
+	# through Caddy's own TLS cert instead of a raw plaintext port -- Caddy's reverse_proxy
+	# handles the WebSocket upgrade transparently. This is also how lk-jwt-service itself reaches
+	# LiveKit for its own room-management calls (LIVEKIT_URL in docker-compose.yml points here,
+	# not at livekit:7880 directly) -- it has no other route to "PUBLIC_DOMAIN" from inside its
+	# own container. See docs/CALLING.md.
+	handle_path /livekit/sfu/* {
+		reverse_proxy livekit:7880
 	}
 
 	handle /_matrix/* {

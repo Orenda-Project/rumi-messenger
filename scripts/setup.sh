@@ -41,7 +41,7 @@ fill_env_var() {
 # `SYNAPSE_PORT=8208 ELEMENT_PORT=8283 scripts/setup.sh`). These must win over both a freshly
 # copied .env.example AND an existing deploy/.env -- otherwise `source`-ing the file below would
 # silently clobber the caller's exported values back to whatever the file says.
-OVERRIDE_VARS=(SERVER_NAME PUBLIC_BASE_URL SYNAPSE_PORT ELEMENT_PORT BIND_ADDR REGISTRATION_MODE COMPOSE_PROJECT_NAME RUMI_CONTAINER_PREFIX TURN_PORT TURN_MIN_PORT TURN_MAX_PORT PUBLIC_DOMAIN ELEMENT_DOMAIN CADDY_TLS_MODE BACKUP_KEEP_N)
+OVERRIDE_VARS=(SERVER_NAME PUBLIC_BASE_URL SYNAPSE_PORT ELEMENT_PORT BIND_ADDR REGISTRATION_MODE COMPOSE_PROJECT_NAME RUMI_CONTAINER_PREFIX TURN_PORT TURN_MIN_PORT TURN_MAX_PORT PUBLIC_DOMAIN ELEMENT_DOMAIN CADDY_TLS_MODE BACKUP_KEEP_N LIVEKIT_PORT LIVEKIT_RTC_TCP_PORT LIVEKIT_RTC_UDP_MIN LIVEKIT_RTC_UDP_MAX LIVEKIT_JWT_PORT)
 for _v in "${OVERRIDE_VARS[@]}"; do
   eval "PRESET_${_v}=\"\${${_v}:-}\""
 done
@@ -110,6 +110,19 @@ if [[ -z "${TURN_SHARED_SECRET:-}" ]]; then
   fill_env_var TURN_SHARED_SECRET "${TURN_SHARED_SECRET}"
   log "  generated TURN_SHARED_SECRET (coturn static-auth-secret / Synapse turn_shared_secret)"
 fi
+# Group calls (issue #2): LiveKit's own API key/secret pair (not the same trust tier/shape as
+# TURN_SHARED_SECRET's HMAC scheme -- LiveKit uses a conventional key+secret pair, verified by
+# both livekit-server itself and lk-jwt-service, which mints per-participant JWTs signed with it).
+if [[ -z "${LIVEKIT_API_KEY:-}" ]]; then
+  LIVEKIT_API_KEY="lkapi$(openssl rand -hex 8)"
+  fill_env_var LIVEKIT_API_KEY "${LIVEKIT_API_KEY}"
+  log "  generated LIVEKIT_API_KEY"
+fi
+if [[ -z "${LIVEKIT_API_SECRET:-}" ]]; then
+  LIVEKIT_API_SECRET="$(rand_secret)"
+  fill_env_var LIVEKIT_API_SECRET "${LIVEKIT_API_SECRET}"
+  log "  generated LIVEKIT_API_SECRET"
+fi
 
 SERVER_NAME="${SERVER_NAME:-localhost}"
 PUBLIC_BASE_URL="${PUBLIC_BASE_URL:-http://localhost:8008}"
@@ -121,6 +134,11 @@ REGISTRATION_MODE="${REGISTRATION_MODE:-open}"
 TURN_PORT="${TURN_PORT:-3478}"
 TURN_MIN_PORT="${TURN_MIN_PORT:-49152}"
 TURN_MAX_PORT="${TURN_MAX_PORT:-65535}"
+LIVEKIT_PORT="${LIVEKIT_PORT:-7880}"
+LIVEKIT_RTC_TCP_PORT="${LIVEKIT_RTC_TCP_PORT:-7881}"
+LIVEKIT_RTC_UDP_MIN="${LIVEKIT_RTC_UDP_MIN:-50100}"
+LIVEKIT_RTC_UDP_MAX="${LIVEKIT_RTC_UDP_MAX:-50200}"
+LIVEKIT_JWT_PORT="${LIVEKIT_JWT_PORT:-8180}"
 # Caddy (profile "prod"/"tls", issue #6) reads these three from its own container environment
 # (docker-compose.yml passes them through) -- write them into deploy/.env explicitly (not just a
 # bash default here) so they exist for Compose's own ${VAR} interpolation too, same reasoning as
@@ -418,6 +436,55 @@ docker run --rm --user root --entrypoint sh \
   "${COTURN_IMAGE}" \
   -c "chown 65534:65534 /data/turnserver.conf && chmod 600 /data/turnserver.conf"
 log "  wrote deploy/coturn/turnserver.conf (listening-ip=${BIND_ADDR}, realm=${SERVER_NAME}, turn_uris host=${TURN_HOST})"
+
+# ---------------------------------------------------------------------------
+# Step 5b: LiveKit SFU config (group calls + screen sharing, issue #2). Rendered unconditionally
+# (cheap, same as coturn's config above) but the livekit/lk-jwt-service CONTAINERS only actually
+# start when the "calls" profile is explicitly requested -- see docs/CALLING.md and
+# scripts/calls-check.sh.
+# ---------------------------------------------------------------------------
+log "Step 5b: LiveKit SFU config (group calls, issue #2)"
+LIVEKIT_DIR="${DEPLOY_DIR}/livekit"
+mkdir -p "${LIVEKIT_DIR}"
+{
+  echo "# Rendered by scripts/setup.sh -- edit deploy/.env, not this file, then re-run setup.sh."
+  # Always 7880/7881 INSIDE the container, matching docker-compose.yml's fixed container-side
+  # port mapping (only the HOST side varies, via LIVEKIT_PORT/LIVEKIT_RTC_TCP_PORT) -- unlike the
+  # UDP rtc range just below, these two are plain HTTP/WS ports that Docker can freely remap, so
+  # (unlike the UDP range) there is no reason for the container-internal values to ever track the
+  # host-side env vars. A version of this file that rendered "port: ${LIVEKIT_PORT}" here caused a
+  # real bug, caught live: livekit-server listened on the *_host_* port value inside its own
+  # container, which docker-compose.yml's healthcheck (hardcoded to the hardcoded container port,
+  # correctly) then couldn't reach whenever LIVEKIT_PORT was overridden away from 7880 -- see
+  # docs/DECISIONS.tsv.
+  echo "port: 7880"
+  echo "bind_addresses:"
+  echo "  - \"0.0.0.0\"   # container-internal bind; host exposure is via BIND_ADDR in docker-compose.yml"
+  echo "rtc:"
+  echo "  tcp_port: 7881"
+  echo "  port_range_start: ${LIVEKIT_RTC_UDP_MIN}"
+  echo "  port_range_end: ${LIVEKIT_RTC_UDP_MAX}"
+  # KNOWN GAP, not silent (same posture as coturn's TURN_EXTERNAL_IP above): false is correct for
+  # local/private-network testing only. A real cross-network deployment behind NAT needs this
+  # true plus a reachable external IP -- LiveKit's own docs call this out for exactly the same
+  # NAT-traversal reason coturn's RUNBOOK section does. Tracked alongside issue #6 in
+  # docs/CALLING.md rather than invented here.
+  echo "  use_external_ip: false"
+  echo "keys:"
+  echo "  ${LIVEKIT_API_KEY}: ${LIVEKIT_API_SECRET}"
+  echo "room:"
+  echo "  # lk-jwt-service (not the SFU) decides who may create a room -- see"
+  echo "  # LIVEKIT_FULL_ACCESS_HOMESERVERS in docker-compose.yml. Per lk-jwt-service's own README"
+  echo "  # warning, auto_create MUST be false or the SFU creates rooms for any caller regardless"
+  echo "  # of what lk-jwt-service decides."
+  echo "  auto_create: false"
+  echo "webhook:"
+  echo "  api_key: ${LIVEKIT_API_KEY}"
+  echo "  urls:"
+  echo "    - \"http://lk-jwt-service:8080/sfu_webhook\""
+} > "${LIVEKIT_DIR}/livekit.yaml"
+chmod 600 "${LIVEKIT_DIR}/livekit.yaml"
+log "  wrote deploy/livekit/livekit.yaml (port=${LIVEKIT_PORT}, rtc udp ${LIVEKIT_RTC_UDP_MIN}-${LIVEKIT_RTC_UDP_MAX})"
 
 # ---------------------------------------------------------------------------
 # Step 6: bring the stack up

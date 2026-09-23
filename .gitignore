@@ -5,6 +5,7 @@ deploy/element/config.json
 deploy/element/welcome.html
 deploy/element/home.html
 deploy/coturn/turnserver.conf
+deploy/livekit/livekit.yaml
 deploy/sygnal/sygnal.yaml
 deploy/sygnal/fcm-service-account.json
 .env

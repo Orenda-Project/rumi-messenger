@@ -15,6 +15,13 @@
   "room_directory": {
     "servers": ["__SERVER_NAME__"]
   },
+  "features": {
+    "feature_group_calls": true,
+    "feature_element_call_video_rooms": true
+  },
+  "element_call": {
+    "brand": "Rumi Calls"
+  },
   "mobile_builds": {
     "ios": "https://apps.apple.com/app/element-x/id1631335820",
     "android": "https://play.google.com/store/apps/details?id=io.element.android.x",
