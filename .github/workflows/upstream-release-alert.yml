@@ -1,0 +1,22 @@
+name: Upstream release alert
+
+# Nothing here changes any code by itself — it only files (or closes) a GitHub issue when
+# an upstream project we pin or fork moves. A human decides whether/when to bump the pin.
+on:
+  schedule:
+    - cron: "0 6 * * 1" # weekly, Monday 06:00 UTC
+  workflow_dispatch: {}
+
+permissions:
+  issues: write
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check upstream releases
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: bash scripts/check-upstream-releases.sh
