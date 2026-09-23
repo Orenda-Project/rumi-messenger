@@ -432,7 +432,15 @@ if [[ "${REGISTER_OK}" == "1" ]]; then
   fi
   USER_A_MXID="@${USER_A}:${SERVER_NAME}"
   DISPLAY_FIRST="Ee2eFind${EPOCH}"
-  DISPLAY_NAME="${DISPLAY_FIRST} Teacher"
+  # The second word carries the epoch too (not a bare "Teacher") -- a real teacher fixture
+  # account (created by hand, by teacher.sh, or by another test run) can accumulate in this
+  # directory over the life of a deployment and will always be a real word like "Teacher" or
+  # "Teacher One", never one with a run-specific epoch glued on. Reproduced live: with a bare
+  # "Teacher" second word and the literal search term "Tea", 10 real "Teacher"-named fixture
+  # accounts created by other test/setup runs filled Synapse's directory-search result window
+  # (limit=10) and silently pushed this run's own throwaway target out of the results -- a
+  # real, reproducible failure, not a flake.
+  DISPLAY_NAME="${DISPLAY_FIRST} Teacher${EPOCH}"
   mxc_call PUT "${TOKEN_A}" "/_matrix/client/v3/profile/${USER_A_MXID}/displayname" \
     "{\"displayname\":\"${DISPLAY_NAME}\"}" >/dev/null
 
@@ -454,9 +462,13 @@ if [[ "${REGISTER_OK}" == "1" ]]; then
   check "user_directory/search by full first name finds a user who shares NO room with the searcher (proves search_all_users)" "${FULL_NAME_SEARCH_OK}" \
     "search_term='${DISPLAY_FIRST}' target='${USER_A_MXID}'"
 
-  PARTIAL_NAME_SEARCH_OK="$(poll_user_directory_search "${TOKEN_C}" "Tea" "${USER_A_MXID}")"
+  # A genuine partial/word-prefix search: shorter than the actual word "Teacher${EPOCH}",
+  # but epoch-unique so it can never collide with a real fixture's plain "Teacher" or "Teacher
+  # One"/"Teacher Two" style name, however many accumulate in this directory over time.
+  PARTIAL_SEARCH_TERM="Teacher${EPOCH:0:4}"
+  PARTIAL_NAME_SEARCH_OK="$(poll_user_directory_search "${TOKEN_C}" "${PARTIAL_SEARCH_TERM}" "${USER_A_MXID}")"
   check "user_directory/search by partial (word-prefix) display name finds the same user" "${PARTIAL_NAME_SEARCH_OK}" \
-    "search_term='Tea' target='${USER_A_MXID}'"
+    "search_term='${PARTIAL_SEARCH_TERM}' target='${USER_A_MXID}'"
 
 else
   check "user A auto-joined #rumi-announcements" 0 "skipped: user registration failed"
