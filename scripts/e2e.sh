@@ -101,6 +101,25 @@ print('1' if found else '0')
 " "${json}" "${body}" 2>/dev/null
 }
 
+json_results_contains_user() {
+  # args: <json-string /user_directory/search response> <user_id> -- prints 1/0, never raises.
+  # Response shape is {"results": [{"user_id": "...", "display_name": "...", ...}, ...], "limited": bool}.
+  local json="$1" user_id="$2"
+  python3 -c "
+import json, sys
+raw, user_id = sys.argv[1], sys.argv[2]
+try:
+    d = json.loads(raw)
+except Exception:
+    d = {}
+results = d.get('results', []) if isinstance(d, dict) else []
+if not isinstance(results, list):
+    results = []
+found = any(isinstance(r, dict) and r.get('user_id') == user_id for r in results)
+print('1' if found else '0')
+" "${json}" "${user_id}" 2>/dev/null
+}
+
 json_list_nonempty() {
   # args: <json-string> <list-key> -- prints 1/0, never raises. Used for turnServer's "uris",
   # where we only care that Synapse handed back at least one, not which.
@@ -369,12 +388,63 @@ if [[ "${REGISTER_OK}" == "1" ]]; then
   fi
   check "coturn is alive and honors the Synapse-issued TURN credentials (docker exec turnutils_uclient ALLOCATE)" "${TURN_LIVE_OK}" "${TURN_LIVE_DETAIL}"
 
+  # -------------------------------------------------------------------------
+  # 8. User directory search (issue #10, "give teachers a way to find each other"). Two checks,
+  #    deliberately both against A's own throwaway account -- freshly created seconds ago in
+  #    check #3 above -- to prove the search_all_users/prefer_local_users config
+  #    (scripts/setup.sh) actually makes a brand-new account discoverable, not just that some
+  #    pre-existing/reindexed account is:
+  #      (a) full first-name search_term finds the user
+  #      (b) a partial (prefix) search_term also finds the user -- proves it isn't an
+  #          exact-full-name-only search, which would be useless for a real "type a few letters"
+  #          UI. NOTE: verified live that Synapse's user_directory search matches by WORD PREFIX
+  #          (tokenizes the display name, then prefix-matches each token), not arbitrary substring
+  #          -- "Tea" matches "... Teacher", but "eacher" (missing the leading "T") does not. This
+  #          check uses a real word-prefix ("Tea", from the second word of the display name set
+  #          below) for exactly that reason; do not "simplify" it back to a mid-word substring.
+  #    Both poll (bounded, 1s steps) rather than checking once immediately -- the directory can
+  #    lag a live profile-name update by a moment, and a flaky one-shot check would be a false
+  #    FAIL, not a real bug. TOKEN_B does the searching (not A) so this also incidentally proves
+  #    search_all_users is really "all users", not just "users I already share a room with" --
+  #    A and B share the #rumi-announcements auto-join room, so a same-room search back could
+  #    otherwise pass even with search_all_users left off.
+  # -------------------------------------------------------------------------
+  USER_A_MXID="@${USER_A}:${SERVER_NAME}"
+  DISPLAY_FIRST="Ee2eFind${EPOCH}"
+  DISPLAY_NAME="${DISPLAY_FIRST} Teacher"
+  mxc_call PUT "${TOKEN_A}" "/_matrix/client/v3/profile/${USER_A_MXID}/displayname" \
+    "{\"displayname\":\"${DISPLAY_NAME}\"}" >/dev/null
+
+  poll_user_directory_search() {
+    # args: <token> <search_term> <target_user_id> -- prints 1/0, polls up to 10x 1s
+    local token="$1" term="$2" target="$3" attempt resp
+    for attempt in $(seq 1 10); do
+      resp="$(mxc_call POST "${token}" "/_matrix/client/v3/user_directory/search" "{\"search_term\":\"${term}\",\"limit\":10}")"
+      if [[ "$(json_results_contains_user "${resp}" "${target}")" == "1" ]]; then
+        echo "1"
+        return 0
+      fi
+      sleep 1
+    done
+    echo "0"
+  }
+
+  FULL_NAME_SEARCH_OK="$(poll_user_directory_search "${TOKEN_B}" "${DISPLAY_FIRST}" "${USER_A_MXID}")"
+  check "user_directory/search by full first name finds a user created seconds ago (within 10s)" "${FULL_NAME_SEARCH_OK}" \
+    "search_term='${DISPLAY_FIRST}' target='${USER_A_MXID}'"
+
+  PARTIAL_NAME_SEARCH_OK="$(poll_user_directory_search "${TOKEN_B}" "Tea" "${USER_A_MXID}")"
+  check "user_directory/search by partial (word-prefix) display name finds the same user" "${PARTIAL_NAME_SEARCH_OK}" \
+    "search_term='Tea' target='${USER_A_MXID}'"
+
 else
   check "user A auto-joined #rumi-announcements" 0 "skipped: user registration failed"
   check "A -> B DM roundtrip (send + readback)" 0 "skipped: user registration failed"
   check "A -> @rumi DM message lands in room" 0 "skipped: user registration failed"
   check "GET /_matrix/client/v3/voip/turnServer returns TURN credentials (Synapse-side config only -- does NOT prove coturn is up, see next check)" 0 "skipped: user registration failed"
   check "coturn is alive and honors the Synapse-issued TURN credentials (docker exec turnutils_uclient ALLOCATE)" 0 "skipped: user registration failed"
+  check "user_directory/search by full first name finds a user created seconds ago (within 10s)" 0 "skipped: user registration failed"
+  check "user_directory/search by partial (word-prefix) display name finds the same user" 0 "skipped: user registration failed"
 fi
 
 # ---------------------------------------------------------------------------

@@ -40,6 +40,99 @@ scripts/devices.sh prune +923360506129 --yes    # same, unattended
 ghost looks like. A real phone or browser has both and is never removed. Run `list` first if unsure.
 After a prune, the teacher retries the failed message in the app; it goes through without signing in again.
 
+## Teacher directory search ("start chat" finds a colleague by name)
+
+[#10](https://github.com/Orenda-Project/rumi-messenger/issues/10): before this, a teacher had to
+know a colleague's exact Matrix id (`@+923001234567:yourserver.org`) to start a chat -- there was
+no "type a name" search. `scripts/setup.sh` now enables Synapse's own user directory and Element
+X's "Start a chat with a colleague" flow searches it directly; nothing in Element itself needed
+changing.
+
+**Config** (`scripts/setup.sh`, Step 3, `homeserver.yaml`):
+
+```yaml
+user_directory:
+  enabled: true
+  search_all_users: true
+  prefer_local_users: true
+```
+
+Keys and defaults are Synapse's own (`enabled` defaults to `true`; `search_all_users` and
+`prefer_local_users` both default to `false`) -- see [Synapse's config
+docs](https://element-hq.github.io/synapse/latest/usage/configuration/config_documentation.html#user_directory).
+`search_all_users: true` is deliberate for a closed school server: every account here comes from
+admin-created teacher onboarding (`scripts/teacher.sh`, below) or the `registration_shared_secret`
+flow, never open public signup, so there's no untrusted stranger to hide a teacher from.
+
+**Reindexing an existing server.** Synapse's own docs warn: enabling `search_all_users` on a server
+whose directory indexes were last built before Synapse 1.44 requires a rebuild, or older/renamed
+users won't be searchable. `scripts/setup.sh` handles this automatically and idempotently: on first
+run after this change it fires the documented admin API job once --
+
+```bash
+curl -s -X POST "http://127.0.0.1:8108/_synapse/admin/v1/background_updates/start_job" \
+  -H "Authorization: Bearer $ADMIN_TOKEN" -H "Content-Type: application/json" \
+  -d '{"job_name":"regenerate_directory"}'
+```
+
+(see [Synapse's Background Updates admin
+API](https://element-hq.github.io/synapse/latest/usage/administration/admin_api/background_updates.html#run))
+-- then drops a marker file, `deploy/synapse/data/.user_directory_reindexed`, so reruns of
+`setup.sh` never repeat the job (it's a full flush-and-rebuild over every local user; harmless but
+pointless to redo on every invocation on a bigger school server). Delete that marker file to force
+a re-run, e.g. after bulk-importing teachers some other way that bypasses `scripts/teacher.sh`.
+This is async on Synapse's side; check progress via the [Background Updates admin
+API](https://element-hq.github.io/synapse/latest/usage/administration/admin_api/background_updates.html)
+if a very large import doesn't show up in search right away. New accounts created one at a time
+(via `teacher.sh` or normal registration) do NOT need this -- verified live: a brand-new account
+was searchable by name within seconds, no manual reindex needed (see `scripts/e2e.sh`).
+
+**Onboarding a teacher with a real name** (so they show up as "Ayesha Khan", not a bare phone
+number):
+
+```bash
+scripts/teacher.sh add "+923001112233" "Ayesha Khan"                       # generates a password
+scripts/teacher.sh add "+923004445566" "Bilal Ahmed" --password teacher1234  # or set your own
+scripts/teacher.sh add "+923001112233" "Ayesha Khan"                       # rerun: updates display
+                                                                            # name only, password
+                                                                            # untouched, never fails
+```
+
+Verified live against this stack:
+
+```bash
+curl -s -X POST "http://127.0.0.1:8108/_matrix/client/v3/user_directory/search" \
+  -H "Authorization: Bearer $ADMIN_TOKEN" -H "Content-Type: application/json" \
+  -d '{"search_term":"Ayesha","limit":10}'
+# -> {"limited": false, "results": [{"user_id": "@+923001112233:localhost",
+#     "display_name": "Ayesha Khan", "avatar_url": null}]}
+```
+
+...and confirmed in Element Web itself: opening "Direct Messages" and typing "Ayesha" filters the
+Suggestions list down to exactly `Ayesha Khan @+923001112233:localhost` -- both teachers created by
+`teacher.sh` also appeared as suggestions before typing anything, since Element pre-populates that
+list from the user directory too.
+
+**Search behavior, so you don't file it as a bug**: it's a per-word PREFIX match (verified live),
+not an arbitrary substring search -- `"Tea"` finds a user whose display name contains `"Teacher"`,
+but `"eacher"` (missing the leading `T`) does not. This matches how a "type a few letters" UI is
+actually used; a mid-word substring engine is not needed here.
+
+**Privacy** (read before ever putting more than one school on one server): with
+`search_all_users: true`, EVERY account on this homeserver can find every other account by name --
+there is no per-school boundary. For the current deployment shape (one Synapse instance per
+school), this is moot: "all users on this server" and "all teachers at this school" are the same
+set, so there's nothing to leak. It stops being moot the moment a second school is put on the same
+homeserver to save infra cost -- at that point teachers from School A could search up and message
+teachers at School B, which is very likely not what either school agreed to. If that ever happens,
+do NOT leave `search_all_users: true` as-is; the two real options are (a) keep one Synapse instance
+per school (simplest, what this stack assumes today), or (b) if a genuinely shared multi-tenant
+server is required, set `search_all_users: false` and give each school its own
+[Space](https://element-hq.github.io/synapse/latest/user_directory.html) so cross-school search
+results are suppressed the same way room-shared/public-room visibility already limits them when
+this flag is off. This repo does not implement (b) -- it isn't needed yet, and building it before a
+second school exists would be speculative.
+
 ## Logs
 
 ```bash

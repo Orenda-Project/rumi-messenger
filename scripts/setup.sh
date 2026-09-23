@@ -195,6 +195,23 @@ config["url_preview_enabled"] = False
 config["presence"] = {"enabled": True}
 config["report_stats"] = False
 
+# User directory (issue #10, "give teachers a way to find each other"): this is what backs
+# Element X's start-chat search box. search_all_users=true is deliberate here -- Rumi Messenger
+# is a CLOSED school server (accounts come only from admin-created teacher onboarding or the
+# registration_shared_secret flow above, never open public signup), so every account on THIS
+# homeserver should be findable by name; there is no untrusted stranger to protect a teacher from
+# by hiding them. prefer_local_users=true ranks this server's own teachers above any
+# remote/federated account in results (this deployment doesn't federate, but costs nothing to set
+# correctly). See docs/RUNBOOK.md for the multi-school privacy tradeoff this implies if this
+# server is ever shared across more than one school.
+# Keys + defaults per Synapse's own config docs, "user_directory" section:
+# https://element-hq.github.io/synapse/latest/usage/configuration/config_documentation.html#user_directory
+config["user_directory"] = {
+    "enabled": True,
+    "search_all_users": True,
+    "prefer_local_users": True,
+}
+
 # Synapse's default rate limits assume a public server defending itself. A school is
 # the opposite shape: a staffroom signs in together at 8am and a class joins a room
 # together, which at the defaults reads as abuse and answers M_LIMIT_EXCEEDED.
@@ -489,6 +506,41 @@ elif [[ -f "${AVATAR_FILE}" ]]; then
   log "  avatar set (${MXC_URI})"
 else
   log "  WARNING: ${AVATAR_FILE} not found, skipping avatar upload"
+fi
+
+# ---------------------------------------------------------------------------
+# User directory reindex (issue #10) -- one-time, idempotent
+# ---------------------------------------------------------------------------
+# search_all_users was just turned on above (Step 3). Per Synapse's own docs (user_directory.md /
+# the search_all_users key note in config_documentation.md): "If you set this to true, and the
+# last time the user_directory search indexes were (re)built was before Synapse 1.44, you'll have
+# to rebuild the indexes in order to search through all known users." The indexes are otherwise
+# only populated at first server startup, so a server that already had users before this change
+# needs one explicit rebuild -- there's no way to make Synapse redo this automatically on config
+# change alone, so we drive the documented admin API ourselves:
+#   POST /_synapse/admin/v1/background_updates/start_job {"job_name": "regenerate_directory"}
+# (https://element-hq.github.io/synapse/latest/usage/administration/admin_api/background_updates.html#run)
+# A marker file makes this idempotent across reruns of this script -- the job is a full flush +
+# regenerate over every local user, unnecessary (and, on a bigger school server, wasteful) to
+# repeat on every setup.sh invocation once it's been done. Delete the marker to force a re-run
+# (e.g. after bulk-importing teachers some other way that bypasses scripts/teacher.sh's own
+# per-user path).
+USER_DIR_REINDEX_MARKER="${SYNAPSE_DATA_DIR}/.user_directory_reindexed"
+if [[ ! -f "${USER_DIR_REINDEX_MARKER}" ]]; then
+  log "  user_directory: triggering one-time regenerate_directory reindex"
+  REINDEX_LOGIN_JSON="$(login_user "${ADMIN_USER}" "${ADMIN_PASSWORD}")"
+  REINDEX_ADMIN_TOKEN="$(python3 -c "import json,sys; print(json.loads(sys.argv[1])['access_token'])" "${REINDEX_LOGIN_JSON}")"
+  curl -fsS -X POST "http://${BIND_ADDR}:${SYNAPSE_PORT}/_synapse/admin/v1/background_updates/start_job" \
+    -H "Authorization: Bearer ${REINDEX_ADMIN_TOKEN}" -H "Content-Type: application/json" \
+    -d '{"job_name":"regenerate_directory"}' >/dev/null
+  # /data is owned by uid/gid 991 inside the container (same as homeserver.yaml, Step 3) -- the
+  # host user can't create a file there directly, but `dc run`/`exec` against this image runs as
+  # root, so write the marker from inside it, same fix as everywhere else in this script that
+  # touches /data.
+  dc run --rm --entrypoint sh synapse -c "touch /data/.user_directory_reindexed" >/dev/null
+  log "  regenerate_directory job started (async -- see docs/RUNBOOK.md to check progress)"
+else
+  log "  user_directory already reindexed once, skipping (rm ${USER_DIR_REINDEX_MARKER} to force)"
 fi
 
 # ---------------------------------------------------------------------------
