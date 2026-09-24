@@ -808,6 +808,28 @@ else
   log "  created #rumi-announcements"
 fi
 
+# Synapse's autocreate_auto_join_rooms makes this room (as the admin, the first user) BEFORE the
+# createRoom above ever runs, and it sets no m.room.name -- so phone and web showed the raw alias
+# "#rumi-announcements:<server>" while the teacher guide says "Rumi Announcements" (QA critic 2).
+# Idempotent: only writes the name when it is missing or different. Admin, not the bot: the
+# autocreated room's creator (admin, PL 100) is the one member guaranteed to hold m.room.name.
+ANN_NAME="Rumi Announcements"
+ANN_ROOM_ID="$(curl -fsS "http://${BIND_ADDR}:${SYNAPSE_PORT}/_matrix/client/v3/directory/room/${ALIAS}" \
+  -H "Authorization: Bearer ${BOT_TOKEN}" | python3 -c "import json,sys; print(json.load(sys.stdin)['room_id'])")"
+ANN_CUR="$(curl -sS "http://${BIND_ADDR}:${SYNAPSE_PORT}/_matrix/client/v3/rooms/${ANN_ROOM_ID}/state/m.room.name" \
+  -H "Authorization: Bearer ${BOT_TOKEN}" | python3 -c "import json,sys; print(json.load(sys.stdin).get('name',''))" 2>/dev/null || true)"
+if [[ "${ANN_CUR}" == "${ANN_NAME}" ]]; then
+  log "  #rumi-announcements already named \"${ANN_NAME}\""
+else
+  ANN_ADMIN_TOKEN="$(login_user "${ADMIN_USER}" "${ADMIN_PASSWORD}" | python3 -c "import json,sys; print(json.load(sys.stdin)['access_token'])")"
+  curl -fsS -X PUT "http://${BIND_ADDR}:${SYNAPSE_PORT}/_matrix/client/v3/rooms/${ANN_ROOM_ID}/state/m.room.name" \
+    -H "Authorization: Bearer ${ANN_ADMIN_TOKEN}" -H "Content-Type: application/json" \
+    -d "{\"name\": \"${ANN_NAME}\"}" >/dev/null
+  curl -fsS -X POST "http://${BIND_ADDR}:${SYNAPSE_PORT}/_matrix/client/v3/logout" \
+    -H "Authorization: Bearer ${ANN_ADMIN_TOKEN}" >/dev/null || true
+  log "  named #rumi-announcements \"${ANN_NAME}\" (was: \"${ANN_CUR}\")"
+fi
+
 # ---------------------------------------------------------------------------
 # Step 9: render Element config + welcome page from the branded templates
 # ---------------------------------------------------------------------------

@@ -194,18 +194,45 @@ check "Element config.json welcome_user_id == @rumi:${SERVER_NAME}" "${WELCOME_O
 # welcome.html (logged-out, #/welcome) must be the RENDERED file (setup.sh substitutes
 # __SERVER_NAME__ / __PUBLIC_BASE_URL__ from welcome.template.html) -- Element's HTML sanitizer
 # blocks any client-side templating, so a literal placeholder reaching the browser is a real bug,
-# not cosmetic. It no longer references @rumi directly (a logged-out, disable_guests visitor
-# can't open a chat pre-auth) -- it points to register/login instead, so this check only proves
-# the template rendered, not raw placeholder text.
+# not cosmetic. Accounts are admin-created (registration is token-only), so the page must offer
+# Sign in and must NOT offer a #/register link that dead-ends at a token prompt (QA critic 2).
 WELCOME_HTML="$(curl -fsS "${ELEMENT_URL}/welcome.html" 2>/dev/null || true)"
 WELCOME_HTML_OK=0
 if [[ -n "${WELCOME_HTML}" ]] \
-  && echo "${WELCOME_HTML}" | grep -qF "#/register" \
+  && echo "${WELCOME_HTML}" | grep -qF "#/login" \
+  && ! echo "${WELCOME_HTML}" | grep -qF "#/register" \
   && ! echo "${WELCOME_HTML}" | grep -qF "__SERVER_NAME__"; then
   WELCOME_HTML_OK=1
 fi
-check "Element welcome.html rendered (#/register link, no __SERVER_NAME__ placeholder)" "${WELCOME_HTML_OK}" \
-  "empty response, missing #/register, or literal __SERVER_NAME__ still present"
+check "Element welcome.html rendered (#/login, no #/register, no __SERVER_NAME__ placeholder)" "${WELCOME_HTML_OK}" \
+  "empty response, missing #/login, #/register still offered, or literal __SERVER_NAME__ still present"
+
+# Teacher wording ("Sign out", "backup code", "Confirm it's you") comes from Element's own
+# custom_translations_url. Element silently ignores an override whose key does not exist in the
+# pinned build, so prove: config points at the file, the file is served as JSON, action|sign_out
+# says "Sign out", and EVERY override key exists in the served en_EN.json of this exact build.
+TR_URL="$(json_field "${CONFIG_JSON}" custom_translations_url)"
+TR_OK=0; TR_DETAIL="config.json has no custom_translations_url"
+if [[ -n "${TR_URL}" ]]; then
+  TR_DETAIL="$(python3 - "${ELEMENT_URL}" "${TR_URL}" <<'PYEOF' 2>&1
+import json, sys, urllib.request
+base, rel = sys.argv[1].rstrip("/"), sys.argv[2]
+get = lambda p: json.load(urllib.request.urlopen(f"{base}/{p.lstrip('/')}", timeout=10))
+tr = get(rel)
+en = get("i18n/" + get("i18n/languages.json")["en"])
+def has(d, parts):
+    for p in parts:
+        if not isinstance(d, dict) or p not in d: return False
+        d = d[p]
+    return isinstance(d, str)
+missing = [k for k in tr if not has(en, k.split("|"))]
+if tr.get("action|sign_out", {}).get("en") != "Sign out": print("action|sign_out override is not 'Sign out'"); sys.exit(1)
+if missing: print(f"{len(missing)} override key(s) not in this build: {missing[:5]}"); sys.exit(1)
+print(f"ok {len(tr)} keys")
+PYEOF
+)" && TR_OK=1
+fi
+check "Element custom_translations_url served, every override key exists in this build" "${TR_OK}" "${TR_DETAIL}"
 
 # home.html (logged-in, no-rooms #/home) is where the @rumi:<server> reference now lives (setup.sh
 # substitutes it from home.template.html) -- this is the real "one tap to Rumi" placement surface

@@ -1,0 +1,212 @@
+{
+  "action|sign_out": {
+    "en": "Sign out"
+  },
+  "auth|logout_dialog|description": {
+    "en": "Are you sure you want to sign out?"
+  },
+  "auth|logout_dialog|setup_secure_backup_description": {
+    "en": "This is your only device. If you sign out you'll need a backup code in order to confirm it's you and restore your encrypted chats the next time you sign in."
+  },
+  "auth|logout_dialog|skip_key_backup": {
+    "en": "Sign out anyway"
+  },
+  "auth|reset_password|other_devices_logout_warning_2": {
+    "en": "If you want to retain access to your chat history in encrypted rooms, get a backup code or export your message keys from one of your other devices before proceeding."
+  },
+  "encryption|access_secret_storage_dialog|alternatives": {
+    "en": "Type the long code you wrote down when you saved your backup code."
+  },
+  "encryption|access_secret_storage_dialog|key_validation_text|wrong_security_key": {
+    "en": "The backup code you entered is not correct."
+  },
+  "encryption|access_secret_storage_dialog|security_key_label": {
+    "en": "Backup code"
+  },
+  "encryption|access_secret_storage_dialog|security_key_title": {
+    "en": "Enter your backup code"
+  },
+  "encryption|enter_recovery_key": {
+    "en": "Enter backup code"
+  },
+  "encryption|forgot_recovery_key": {
+    "en": "Forgot backup code?"
+  },
+  "encryption|identity_needs_reset_description": {
+    "en": "You have to start fresh in order to ensure access to your chat history"
+  },
+  "encryption|key_storage_out_of_sync": {
+    "en": "Your chat backup is out of sync."
+  },
+  "encryption|key_storage_out_of_sync_description": {
+    "en": "Confirm your backup code to maintain access to your chat backup and message history."
+  },
+  "encryption|set_up_recovery_toast_description": {
+    "en": "Your chats are automatically backed up with end-to-end encryption. To restore this backup when you lose access to all your devices, you will need your backup code."
+  },
+  "encryption|turn_on_key_storage": {
+    "en": "Turn on chat backup"
+  },
+  "encryption|turn_on_key_storage_description": {
+    "en": "This will allow you to view your chat history on any new devices."
+  },
+  "encryption|verification|confirm_identity_title": {
+    "en": "Confirm it's you"
+  },
+  "encryption|verification|use_another_device": {
+    "en": "Approve on my other phone"
+  },
+  "encryption|verification|use_recovery_key": {
+    "en": "Enter my backup code"
+  },
+  "error|session_restore|clear_storage_button": {
+    "en": "Sign out"
+  },
+  "error|session_restore|clear_storage_description": {
+    "en": "Sign out and clear this browser's encryption keys?"
+  },
+  "error|session_restore|description_3": {
+    "en": "Clearing your browser's storage may fix the problem, but will sign you out and cause any encrypted chat history to become unreadable."
+  },
+  "error|storage_evicted_description_1": {
+    "en": "Some session data, including encrypted message keys, is missing. Sign out and sign in again to fix this, restoring keys from backup."
+  },
+  "restore_key_backup_dialog|enter_key_description": {
+    "en": "Access your secure message history and set up secure messaging by entering your backup code."
+  },
+  "restore_key_backup_dialog|enter_key_title": {
+    "en": "Enter backup code"
+  },
+  "restore_key_backup_dialog|key_forgotten_text": {
+    "en": "If you've forgotten your backup code you can <button>set up new recovery options</button>"
+  },
+  "restore_key_backup_dialog|key_is_invalid": {
+    "en": "Not a valid backup code"
+  },
+  "restore_key_backup_dialog|key_is_valid": {
+    "en": "This looks like a valid backup code!"
+  },
+  "restore_key_backup_dialog|phrase_forgotten_text": {
+    "en": "If you've forgotten your Security Phrase you can <button1>use your backup code</button1> or <button2>set up new recovery options</button2>"
+  },
+  "restore_key_backup_dialog|recovery_key_mismatch_description": {
+    "en": "Backup could not be decrypted with this backup code: please verify that you entered the correct backup code."
+  },
+  "restore_key_backup_dialog|recovery_key_mismatch_title": {
+    "en": "Backup code mismatch"
+  },
+  "settings|encryption|advanced|breadcrumb_page": {
+    "en": "Start fresh"
+  },
+  "settings|encryption|advanced|breadcrumb_title": {
+    "en": "Are you sure you want to start fresh?"
+  },
+  "settings|encryption|advanced|breadcrumb_title_cant_confirm": {
+    "en": "You need to start fresh"
+  },
+  "settings|encryption|advanced|breadcrumb_title_forgot": {
+    "en": "Forgot your backup code? You’ll need to start fresh."
+  },
+  "settings|encryption|advanced|breadcrumb_title_sync_failed": {
+    "en": "Failed to sync chat backup. You need to start fresh."
+  },
+  "settings|encryption|advanced|reset_identity": {
+    "en": "Start fresh"
+  },
+  "settings|encryption|confirm_key_storage_off": {
+    "en": "Are you sure you want to keep chat backup turned off?"
+  },
+  "settings|encryption|delete_key_storage|breadcrumb_page": {
+    "en": "Delete chat backup"
+  },
+  "settings|encryption|delete_key_storage|confirm": {
+    "en": "Delete chat backup"
+  },
+  "settings|encryption|delete_key_storage|description": {
+    "en": "Deleting chat backup will remove your cryptographic identity and message keys from the server and turn off the following security features:"
+  },
+  "settings|encryption|delete_key_storage|title": {
+    "en": "Are you sure you want to turn off chat backup and delete it?"
+  },
+  "settings|encryption|key_storage|allow_key_storage": {
+    "en": "Allow chat backup"
+  },
+  "settings|encryption|key_storage|description": {
+    "en": "This will allow you to view your chat history on any new devices. <a>Learn more</a>"
+  },
+  "settings|encryption|key_storage|title": {
+    "en": "Chat backup"
+  },
+  "settings|encryption|recovery|change_recovery_confirm_button": {
+    "en": "Confirm new backup code"
+  },
+  "settings|encryption|recovery|change_recovery_confirm_description": {
+    "en": "Enter your new backup code below to finish. Your old one will no longer work."
+  },
+  "settings|encryption|recovery|change_recovery_confirm_title": {
+    "en": "Enter your new backup code"
+  },
+  "settings|encryption|recovery|change_recovery_key": {
+    "en": "Change backup code"
+  },
+  "settings|encryption|recovery|change_recovery_key_description": {
+    "en": "Write down this new backup code somewhere safe. Then click Continue to confirm the change."
+  },
+  "settings|encryption|recovery|change_recovery_key_title": {
+    "en": "Change backup code?"
+  },
+  "settings|encryption|recovery|description": {
+    "en": "Your chats are automatically backed up with end-to-end encryption. To restore this backup when you lose access to all your devices, you will need your backup code."
+  },
+  "settings|encryption|recovery|enter_key_error": {
+    "en": "The backup code you entered is not correct."
+  },
+  "settings|encryption|recovery|enter_recovery_key": {
+    "en": "Enter backup code"
+  },
+  "settings|encryption|recovery|forgot_recovery_key": {
+    "en": "Forgot backup code?"
+  },
+  "settings|encryption|recovery|key_storage_warning": {
+    "en": "Your chat backup is out of sync. Click one of the buttons below to fix the problem."
+  },
+  "settings|encryption|recovery|save_key_title": {
+    "en": "Backup code"
+  },
+  "settings|encryption|recovery|set_up_recovery": {
+    "en": "Get backup code"
+  },
+  "settings|encryption|recovery|set_up_recovery_confirm_description": {
+    "en": "Enter the backup code shown on the previous screen to finish setting up recovery."
+  },
+  "settings|encryption|recovery|set_up_recovery_confirm_title": {
+    "en": "Enter your backup code to confirm"
+  },
+  "settings|encryption|recovery|set_up_recovery_description": {
+    "en": "Your chat backup is protected by a backup code. If you need a new backup code after setup, you can recreate it by selecting ‘%(changeRecoveryKeyButton)s’."
+  },
+  "settings|encryption|recovery|set_up_recovery_save_key_description": {
+    "en": "Write down this backup code somewhere safe, like a password manager, encrypted note, or a physical safe."
+  },
+  "settings|encryption|recovery|set_up_recovery_save_key_title": {
+    "en": "Save your backup code somewhere safe"
+  },
+  "settings|encryption|recovery|set_up_recovery_secondary_description": {
+    "en": "After clicking continue, we’ll generate a backup code for you."
+  },
+  "settings|key_backup|setup_secure_backup|generate_security_key_description": {
+    "en": "We'll generate a backup code for you to store somewhere safe, like a password manager or a safe."
+  },
+  "settings|key_backup|setup_secure_backup|generate_security_key_title": {
+    "en": "Generate a backup code"
+  },
+  "settings|key_backup|setup_secure_backup|security_key_safety_reminder": {
+    "en": "Store your backup code somewhere safe, like a password manager or a safe, as it's used to safeguard your encrypted data."
+  },
+  "settings|key_backup|setup_secure_backup|title_save_key": {
+    "en": "Save your backup code"
+  },
+  "settings|key_backup|setup_secure_backup|use_phrase_only_you_know": {
+    "en": "Use a secret phrase only you know, and optionally save a backup code to use for backup."
+  }
+}

@@ -88,8 +88,10 @@ nothing to install.
 
 ### In the web app
 
-1. Open your school's server address in your browser.
-2. Click **Sign in**. The server is already filled in, so there's nothing to type there.
+1. Open your school's server address in your browser. The page says "Your school admin creates
+   your account; sign in with the phone number and password they gave you."
+2. Click **Sign in**. The server is already filled in, so there's nothing to type there. There's
+   no **Create account** button: you can't make your own account, your admin does it for you.
 3. Enter your username (`+923001234567`) and password, then click **Sign in**.
 
 ## 4. Say hello to Rumi
@@ -166,10 +168,12 @@ Rumi doesn't respond to anything else, so the group stays a conversation between
 microphone to record a voice note.
 
 **Call someone.** Open a one-to-one chat. The phone and camera buttons at the top start a voice
-or video call. On the web your colleague sees **Incoming voice call**, then **Join**. The first
-video call asks to use your camera: tap **While using the app**. To hang up, tap the red button.
-Each call stays in the chat as a **Call started** line (on the web: **Voice call** / **Video call**);
-a call you missed looks the same, there is no separate "missed call" line yet. Calls from the web to
+or video call. On the web there is one phone button and one camera button, and clicking one
+starts the call straight away (no "which kind of call?" question). Your colleague sees
+"*name* started a call" in the chat, with a **Join** button. The first video call asks to use your
+camera: tap **While using the app** (on the web, click **Allow**). To hang up, tap the red button.
+Each call stays in the chat as a **Call started** line (on the web: a call line that says **Call in
+progress** while it runs); a call you missed looks the same, there is no separate "missed call" line yet. Calls from the web to
 the phone ring only when notifications are set up (see "About notifications" below).
 
 > **Not yet proven:** calls between two different buildings or networks, and on real phones
@@ -199,7 +203,8 @@ long code that opens your old messages on a new phone. Without it, a new phone c
 earlier chats. (App versions up to v0.1.1 call it the **recovery key**. It's the same thing.)
 
 1. At the top of the chat list, the app shows **Save your backup code**. Tap **Get backup code**.
-   (Or go to **Settings**, then **Encryption**.)
+   (Or go to **Settings**, then **Encryption**.) On the web the box says **Back up your chats**:
+   click **Continue**, then **Get backup code**.
 2. The app shows a code. Write it on paper, or save it somewhere private that isn't this phone.
 3. Don't share it. Your admin doesn't have it and can't get it back for you.
 
@@ -215,11 +220,13 @@ most problems happen, so follow these steps in this order:
    - **Enter my backup code**: type the code from [section 7](#7-save-your-backup-code-do-this-on-day-one).
 4. When the new device says it's confirmed, you're done. Your old messages appear on it.
 
-**If you see "Can't confirm? You can start fresh.", stop.**
+**If you see "Can't confirm? You can start fresh.", stop.** (On the web: a **Can't confirm?**
+button, then a screen asking "Are you sure you want to start fresh?")
 
 ![The start-fresh warning](img/teacher-6-reset-warning.png)
 
-Don't tap **Start fresh** unless you've truly lost your backup code and every other device.
+Don't tap **Start fresh** (on the web, the red **Continue** on that screen) unless you've truly
+lost your backup code and every other device.
 Starting fresh keeps your account and chat list. But every message you had before shows up as
 "Waiting for this message" and never opens. Go back, open your first device, or find your
 backup code, and try again. (App versions up to v0.1.1 word this screen as "reset your digital
@@ -229,7 +236,7 @@ identity", with a **Continue reset** button, as in the picture.)
 longer stops your messages. You don't need to fix anything first.
 
 **Signing out of an old phone.** When you stop using a device, sign out of it (**Settings**, then
-**Sign out**), or ask your admin to remove it. A device left signed in can still receive your new
+**Sign out**; on the web, **All settings**, **Account**, **Sign out**), or ask your admin to remove it. A device left signed in can still receive your new
 messages, so never leave one signed in on a phone you've given away.
 
 ## 9. What is private
@@ -249,6 +256,7 @@ messages, so never leave one signed in on a phone you've given away.
 | What you see | What to do |
 |---|---|
 | A spinner that never stops after you type the server address | Check that you typed `https://` or `http://` at the start, then try again. If you can, copy the address exactly as your admin sent it. |
+| You're looking for a **Create account** button | There isn't one. Your school admin creates your account and gives you your phone-number username and a password. |
 | "Invalid username or password" | Type the username with the `+` and no spaces: `+923001234567`. Passwords are case-sensitive. If it still fails, ask your admin to reset your password. There's no "forgot password" email. |
 | A message has a red mark and says "Message not sent because you have not verified one or more of your devices" | Only app versions up to v0.1.1 do this. Install the newer app from your admin's link. Until then: press and hold the message, open the details, and tap **Send message anyway**, and tell your admin so they can remove your old sign-ins. |
 | You don't see a Rumi chat at all | Wait a minute, then pull the chat list down to refresh it. If Rumi still isn't there, tell your admin: the Rumi service may not be connected to your school's server yet. You can still chat with colleagues in the meantime. |

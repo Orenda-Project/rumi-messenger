@@ -12,15 +12,19 @@
   "disable_custom_urls": true,
   "disable_guests": true,
   "show_labs_settings": false,
+  "custom_translations_url": "rumi-translations.json",
   "room_directory": {
     "servers": ["__SERVER_NAME__"]
   },
   "features": {
     "feature_group_calls": true,
-    "feature_element_call_video_rooms": true
+    "feature_element_call_video_rooms": true,
+    "feature_video_rooms": false,
+    "feature_notification_settings2": false
   },
   "element_call": {
-    "brand": "Rumi Calls"
+    "brand": "Rumi Calls",
+    "use_exclusively": true
   },
   "mobile_builds": {
     "ios": "https://apps.apple.com/app/element-x/id1631335820",
@@ -40,6 +44,7 @@
     ]
   },
   "setting_defaults": {
+    "UIFeature.registration": false,
     "custom_themes": [
       {
         "name": "Rumi",
