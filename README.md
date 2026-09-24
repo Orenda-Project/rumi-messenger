@@ -17,6 +17,7 @@ Rumi deployment can move to instead of paying per message.
 |---|---|
 | **A teacher.** I want to install the app, sign in and talk to Rumi. | [Teacher guide](docs/TEACHER-GUIDE.md) |
 | **The person who runs my school's IT.** I want to set up the server and add teachers. | [Admin guide](docs/ADMIN-GUIDE.md) |
+| **A decision maker.** Is this free? Legal? What must a school know? | [Licensing and trademarks](docs/LICENSING.md) |
 | **A developer.** I want to know how it works or to contribute. | [Architecture](docs/ARCHITECTURE.md), [Plan](docs/PLAN.md), [Decisions log](docs/DECISIONS.tsv), [Runbook](docs/RUNBOOK.md), [Contributing](CONTRIBUTING.md) |
 
 ## What it is
