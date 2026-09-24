@@ -166,12 +166,13 @@ Rumi doesn't respond to anything else, so the group stays a conversation between
 microphone to record a voice note.
 
 **Call someone.** Open a one-to-one chat. The phone and camera buttons at the top start a voice
-or video call.
+or video call. Your colleague's app rings (on the web: **Incoming voice call**, then **Join**).
+The first video call asks to use your camera: tap **While using the app**. To hang up, tap the red
+button. Each call stays in the chat as a **Call started** line. Phone and web can call each other.
 
-> **Coming:** calls between two different buildings or networks only work once your admin has
-> finished setting up the server on the internet. Until then, a call can connect but stay silent.
-> Group calls and screen sharing aren't ready yet
-> ([#2](https://github.com/Orenda-Project/rumi-messenger/issues/2)).
+> **Not yet proven:** calls between two different buildings or networks, and on real phones
+> (we tested on one server with an Android emulator). If a call connects but you can't hear
+> anything, tell your admin.
 
 About notifications:
 

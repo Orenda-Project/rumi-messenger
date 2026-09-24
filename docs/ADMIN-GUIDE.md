@@ -57,7 +57,8 @@ explains why.
   For other systems, see [Docker's install docs](https://docs.docker.com/engine/install/).
 - **A domain name** you control, such as `chat.yourschool.org`, plus the ability to add a DNS `A`
   record. You only need it to go live, not for the trial.
-- **Open firewall ports** (going live only): TCP 80 and 443, TCP+UDP 3478, and UDP 49152-65535.
+- **Open firewall ports** (going live only): TCP 80 and 443, TCP+UDP 3478, UDP 49152-65535
+  (coturn), and for calls TCP 7881 plus UDP 50100-50200 (LiveKit media).
   The [RUNBOOK port table](RUNBOOK.md#ports-to-open-on-the-servers-firewall--cloud-security-group)
   explains each one.
 - **For Rumi:** Node.js 24 or newer, a rumi-platform checkout and its accounts (Supabase,
@@ -279,12 +280,17 @@ the public IP. On a LAN-only server you need `ip_range_whitelist` in `homeserver
 
 ## 8. Calls
 
-**One-to-one voice and video** works through the coturn relay that `setup.sh` already starts.
-For calls between different networks to work, a live server also needs these:
+`setup.sh` starts everything calls need by default: coturn (the web app's legacy 1:1 calls) and
+LiveKit + lk-jwt-service (Element Call, the ONLY way the phone app calls). `CALLS=off` in
+`deploy/.env` leaves LiveKit out and stops advertising it; then the phone app cannot call at all.
+`scripts/calls-check.sh` must pass after every setup, and `scripts/e2e.sh` checks that the call
+address Synapse hands out really answers. Ports, the emulator recipe and the proof are in
+[CALLING.md](CALLING.md). For calls between different networks to work, a live server also needs these:
 
 - `TURN_EXTERNAL_IP=<your public IP>` in `deploy/.env`, then run `scripts/setup.sh` again.
-- UDP 3478 and UDP 49152-65535 open. Many school firewalls block UDP. If they do, a call connects
-  but has no sound or picture.
+- UDP 3478 and UDP 49152-65535 open (coturn), plus TCP 7881 and UDP 50100-50200 (LiveKit, with
+  `LIVEKIT_MEDIA_BIND_ADDR=0.0.0.0` and `LIVEKIT_NODE_IP=<public IP>`). Many school firewalls
+  block UDP. If they do, a call connects but has no sound or picture.
 - A real test: two people on two different networks (home Wi-Fi and mobile data) place a call.
   You can't prove this from the server alone. See [RUNBOOK: Calls](RUNBOOK.md#calls-11-audiovideo-issue-1).
 

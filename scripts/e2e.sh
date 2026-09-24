@@ -405,6 +405,39 @@ if [[ "${REGISTER_OK}" == "1" ]]; then
   check "coturn is alive and honors the Synapse-issued TURN credentials (docker exec turnutils_uclient ALLOCATE)" "${TURN_LIVE_OK}" "${TURN_LIVE_DETAIL}"
 
   # -------------------------------------------------------------------------
+  # 7b. The call transport Synapse ADVERTISES must actually work (Element X can only call
+  #     through Element Call, so a dead address here = the phone can never call). Falsifiable:
+  #     stop lk-jwt-service, or advertise https://localhost/livekit/jwt with no Caddy (the QA
+  #     critic's OPEN_ID_ERROR), and this FAILs. Uses A's real OpenID token -> /sfu/get -> JWT.
+  #     Nothing advertised (CALLS=off) is a PASS: no client is sent anywhere.
+  # -------------------------------------------------------------------------
+  RTC_JSON="$(curl -s -H "Authorization: Bearer ${TOKEN_A}" "${SYNAPSE_URL}/_matrix/client/unstable/org.matrix.msc4143/rtc/transports" 2>/dev/null || true)"
+  RTC_URL="$(python3 -c "
+import json,sys
+try: d=json.loads(sys.argv[1])
+except Exception: d={}
+t=[x for x in d.get('rtc_transports',[]) if x.get('type')=='livekit'] if isinstance(d,dict) else []
+print(t[0].get('livekit_service_url','') if t else '')
+" "${RTC_JSON}" 2>/dev/null)"
+  if [[ -z "${RTC_URL}" ]]; then
+    RTC_OK=1; RTC_DETAIL="no call transport advertised"
+  else
+    OID_JSON="$(curl -s -X POST -H "Authorization: Bearer ${TOKEN_A}" -H 'Content-Type: application/json' -d '{}' \
+      "${SYNAPSE_URL}/_matrix/client/v3/user/$(python3 -c 'import sys,urllib.parse;print(urllib.parse.quote(sys.argv[1]))' "@${USER_A}:${SERVER_NAME}")/openid/request_token" 2>/dev/null || true)"
+    SFU_BODY="$(python3 -c "
+import json,sys
+try: o=json.loads(sys.argv[1])
+except Exception: o={}
+print(json.dumps({'room':'!e2e-call:'+sys.argv[2],'device_id':'E2E','openid_token':o}))
+" "${OID_JSON}" "${SERVER_NAME}" 2>/dev/null)"
+    SFU_OUT="$(curl -sk --max-time 40 -w '\n%{http_code}' -X POST -H 'Content-Type: application/json' -d "${SFU_BODY}" "${RTC_URL%/}/sfu/get" 2>/dev/null || true)"
+    SFU_CODE="${SFU_OUT##*$'\n'}"; SFU_RESP="${SFU_OUT%$'\n'*}"
+    RTC_OK=0; [[ "${SFU_CODE}" == "200" && -n "$(json_field "${SFU_RESP}" jwt)" ]] && RTC_OK=1
+    RTC_DETAIL="POST ${RTC_URL}/sfu/get -> HTTP ${SFU_CODE:-000} ${SFU_RESP:0:160}"
+  fi
+  check "advertised call transport answers a real OpenID token with a LiveKit JWT (${RTC_URL:-none advertised})" "${RTC_OK}" "${RTC_DETAIL}"
+
+  # -------------------------------------------------------------------------
   # 8. User directory search (issue #10, "give teachers a way to find each other"). Two checks,
   #    deliberately both against A's own throwaway account -- freshly created seconds ago in
   #    check #3 above -- to prove the search_all_users/prefer_local_users config
@@ -492,6 +525,7 @@ else
   check "A -> @rumi DM message lands in room" 0 "skipped: user registration failed"
   check "GET /_matrix/client/v3/voip/turnServer returns TURN credentials (Synapse-side config only -- does NOT prove coturn is up, see next check)" 0 "skipped: user registration failed"
   check "coturn is alive and honors the Synapse-issued TURN credentials (docker exec turnutils_uclient ALLOCATE)" 0 "skipped: user registration failed"
+  check "advertised call transport answers a real OpenID token with a LiveKit JWT" 0 "skipped: user registration failed"
   check "user_directory/search by full first name finds a user who shares NO room with the searcher (proves search_all_users)" 0 "skipped: user registration failed"
   check "user_directory/search by partial (word-prefix) display name finds the same user" 0 "skipped: user registration failed"
 fi

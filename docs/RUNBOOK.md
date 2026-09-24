@@ -332,12 +332,11 @@ registration closed, Postgres/Synapse/Element not directly exposed, coturn harde
 scripts/prod-check.sh
 ```
 
-Several checks are **supposed** to fail against the plain dev stack (no Caddy, open
-registration) -- that's what makes this a real check and not a script that always prints PASS.
+Several checks are **supposed** to fail against the plain dev stack (no Caddy, no TLS) -- that's what makes this a real check and not a script that always prints PASS.
 Verified live on this repo: 6/11 failing with the `prod` profile down, 10/11 passing once it was
-brought up with `CADDY_TLS_MODE=internal` (the one still-failing check, registration, is real --
-`REGISTRATION_MODE` on this dev stack is deliberately left `open` for testing; flip it to `token`
-before inviting real teachers, see "Registration modes" below).
+brought up with `CADDY_TLS_MODE=internal` (the one still-failing check then was registration, while
+the dev stack ran `open`). Since 2026-09-24 `token` is the default and the registration check
+passes on the dev stack too; the 4 TLS/Caddy checks are the only expected failures there.
 
 ## Calls (1:1 audio/video, issue #1)
 
@@ -420,19 +419,17 @@ your phone's mobile data with WiFi off, not two devices on the same router):
 
 ## Group calls + screen sharing (issue #2)
 
-Full picture (architecture, known gaps, capacity story, the "SERVER_NAME can't literally be
-`localhost`" local-testing gotcha) is in `docs/CALLING.md`. Short version:
+Full picture (architecture, ports, the emulator recipe, known gaps) is in `docs/CALLING.md`.
+Short version: `scripts/setup.sh` starts LiveKit + calls-proxy + lk-jwt-service by default
+(`CALLS=off` to leave them out) and writes the call address into Synapse's MSC4143
+`/rtc/transports`, the one place both apps read it: `http://<host>:LIVEKIT_JWT_PORT` on a plain
+http stack, `https://PUBLIC_DOMAIN/livekit/jwt` (through the `prod` Caddy) on an https one. Never
+point clients at `lk-jwt-service:8080` -- phones cannot resolve it (OPEN_ID_ERROR).
 
 ```bash
-docker compose --profile calls --profile prod up -d livekit lk-jwt-service caddy
-scripts/calls-check.sh
+scripts/setup.sh
+scripts/calls-check.sh     # 12 checks, incl. a real OpenID token -> LiveKit JWT from the advertised URL
 ```
-
-`calls` starts the LiveKit SFU + lk-jwt-service; `prod` (Caddy) serves them to clients at
-`https://PUBLIC_DOMAIN/livekit/jwt` and `wss://PUBLIC_DOMAIN/livekit/sfu`. Synapse advertises the
-same public URL on its own MSC4143 `/rtc/transports` (Element X) and Caddy's `.well-known`
-(Element Web). Never point clients at `lk-jwt-service:8080` -- phones cannot resolve it
-(OPEN_ID_ERROR); `calls-check.sh` fails if anything does.
 
 Proven 2026-09-23 on an isolated `rumi.calls.test` stack: 3 teachers in one call, every tile
 visible to every participant, plus a screen share (`docs/CALLING.md`, "Round-2 call proof").
@@ -447,13 +444,13 @@ room creator can join a call there. Lower it per room (`docs/CALLING.md`, root-c
 
 Set in `deploy/.env` (`REGISTRATION_MODE`), applied by `scripts/setup.sh` step 3:
 
-- **`open`** (default) -- anyone who can reach Synapse can register. Fine for a closed network or
-  a demo; not what you want once the URL is public.
-- **`token`** -- registration requires a one-time token. Switch to this before exposing a
-  deployment publicly:
+- **`token`** (default since 2026-09-24) -- registration requires a one-time token. Teacher
+  accounts come from `scripts/teacher.sh` (shared-secret registrar, unaffected), so nobody signs
+  themselves up from the login screen.
+- **`open`** -- anyone who can reach Synapse can register. Only for a throwaway test server:
 
   ```bash
-  # deploy/.env: REGISTRATION_MODE=token
+  # deploy/.env: REGISTRATION_MODE=open
   scripts/setup.sh   # re-patches homeserver.yaml, restarts synapse
   ```
 
@@ -626,18 +623,16 @@ domain/server, and can't be faked from this machine:
   into a scratch database).
 - `scripts/prod-check.sh` catches real regressions -- verified live to FAIL 6/11 checks on the
   plain dev stack and PASS 10/11 once `prod`/`tls` was up with `CADDY_TLS_MODE=internal` (the one
-  remaining fail, open registration, is real and expected -- see below).
+  remaining fail was open registration, the dev default until 2026-09-24).
 
 **Needs a real domain/server to actually finish (can't be proven from a laptop):**
 - A publicly trusted TLS cert -- `CADDY_TLS_MODE=internal`'s self-signed cert proves the mechanism,
   not the cert; real ACME needs ports 80/443 reachable from the internet.
 - `TURN_EXTERNAL_IP` for coturn behind NAT, and a real cross-device call (no way to prove NAT
   traversal between two independent networks from one host -- see the "Calls" section above).
-- Flipping `REGISTRATION_MODE=open` to `token` and minting real tokens for a school's staff
-  (`docs/RUNBOOK.md`'s "Registration modes" section has the admin-API command) -- left `open` on
-  this repo's own dev stack deliberately, since flipping it would break existing local/e2e testing
-  flows that assume open registration; a real deployment should decide this before inviting
-  teachers.
+- Minting real registration tokens for a school's staff, if the admin wants self sign-up at all
+  ("Registration modes" has the admin-API command). `token` is the default since 2026-09-24;
+  `scripts/e2e.sh` uses the shared-secret registrar and stays green under it.
 - Deciding and setting real media retention (see "Media retention" above) and a disk-size budget
   once real upload volume exists.
 - Group calls (issue #2): 3 participants + screen share proven on one machine (isolated
@@ -663,8 +658,8 @@ everything), you only need the one record.
 | 8448 | TCP | -- | Only if federation is ever turned on (currently OFF, issue #8) -- not needed for this deployment shape |
 | `TURN_PORT` (3478 default) | TCP + UDP | coturn | STUN/TURN signalling |
 | `TURN_MIN_PORT`-`TURN_MAX_PORT` (49152-65535 default) | **UDP only** | coturn | Relayed call media -- see "Calls" section above for why this must be UDP, not just the signalling port |
-| `LIVEKIT_RTC_TCP_PORT` (7881 default) | TCP | LiveKit | Group-call media fallback; only with the `calls` profile + `LIVEKIT_MEDIA_BIND_ADDR=0.0.0.0` |
-| `LIVEKIT_RTC_UDP_MIN`-`LIVEKIT_RTC_UDP_MAX` (50100-50200 default) | UDP | LiveKit | Group-call media; signalling goes through Caddy on 443 |
+| `LIVEKIT_RTC_TCP_PORT` (7881 default) | TCP | LiveKit | Call media fallback (every phone-app call, and group calls); needs `LIVEKIT_MEDIA_BIND_ADDR=0.0.0.0` |
+| `LIVEKIT_RTC_UDP_MIN`-`LIVEKIT_RTC_UDP_MAX` (50100-50200 default) | UDP | LiveKit | Call media; signalling goes through Caddy on 443 |
 
 Do **not** open Synapse's `SYNAPSE_PORT`, Element's `ELEMENT_PORT`, or Postgres's `5432` directly
 -- they should never be reachable except through Caddy / the Docker-internal network. Run

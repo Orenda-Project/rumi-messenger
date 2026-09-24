@@ -229,17 +229,13 @@ services:
       retries: 10
       start_period: 5s
 
-  # Group calls + screen sharing (issue #2). LiveKit is the SFU that mixes/forwards media for
-  # 3+ participants (1:1 calls stay peer-to-peer via coturn above, issue #1); lk-jwt-service is
-  # the bridge Element Web's built-in Element Call widget talks to for a signed LiveKit token,
-  # per MSC4195. Behind the "calls" compose profile, same off-by-default posture as
-  # "push"/"tls"/"prod" -- `docker compose --profile calls up -d` opts in on its own; combine
-  # with `--profile prod` (or `tls`) for a client to actually be able to DISCOVER these services
-  # (Caddy serves the public /livekit/jwt + /livekit/sfu routes; discovery is Caddy's
-  # .well-known rtc_foci for Element Web and Synapse's MSC4143 /rtc/transports for Element X,
-  # both the same public URL -- see docs/CALLING.md). Config is rendered by
-  # scripts/setup.sh into deploy/livekit/livekit.yaml (gitignored), same pattern as coturn's
-  # turnserver.conf.
+  # Calls (issues #1 + #2). LiveKit is the SFU that carries every Element Call -- 1:1 calls from
+  # the phone app included, since Element X has no legacy peer-to-peer calling -- and
+  # lk-jwt-service is the bridge the Element Call widget (web and phone) talks to for a signed
+  # LiveKit token, per MSC4195. Behind the "calls" compose profile so CALLS=off can leave it out,
+  # but scripts/setup.sh starts it BY DEFAULT and only advertises it (Synapse's MSC4143
+  # /rtc/transports, the one discovery path both apps read) when it did start it. Config is
+  # rendered by scripts/setup.sh into deploy/livekit/livekit.yaml (gitignored). See docs/CALLING.md.
   livekit:
     # Pinned to the exact version resolved from :latest on 2026-09-23 (livekit/livekit-server
     # 1.13.7). To upgrade: check https://github.com/livekit/livekit/releases, bump this tag, then
@@ -277,6 +273,29 @@ services:
       retries: 10
       start_period: 10s
 
+  # Network namespace + tiny proxy for lk-jwt-service (issue #2, default dev stack). lk-jwt-service
+  # checks a teacher's OpenID token over HTTPS federation discovery for the token's server name,
+  # FROM INSIDE ITS OWN CONTAINER: https://<server_name>/.well-known/matrix/server, then
+  # https://<server_name>:8448. With the default SERVER_NAME=localhost that is lk-jwt-service
+  # itself, and it also uses the SAME LiveKit URL it hands to clients (ws://localhost:7880 on the
+  # dev stack) for its own room-creation calls. lk-jwt-service runs in THIS container's network
+  # namespace, so "localhost" here is this Caddy: :8448 (internal self-signed TLS) answers the
+  # one OpenID userinfo endpoint from Synapse, and :LIVEKIT_PORT forwards to the SFU. Harmless on
+  # a real domain (those lookups resolve to the prod Caddy as before). Also publishes
+  # lk-jwt-service's port, since a container using network_mode: service cannot publish its own.
+  calls-proxy:
+    image: caddy:2-alpine
+    container_name: ${RUMI_CONTAINER_PREFIX:-rumi}-calls-proxy
+    restart: unless-stopped
+    logging: *default-logging
+    profiles: ["calls"]
+    environment:
+      LIVEKIT_PORT: "${LIVEKIT_PORT:-7880}"
+    volumes:
+      - ./livekit/calls-proxy.Caddyfile:/etc/caddy/Caddyfile:ro
+    ports:
+      - "${BIND_ADDR:-127.0.0.1}:${LIVEKIT_JWT_PORT:-8180}:8080"
+
   lk-jwt-service:
     # Pinned by digest, not tag: element-hq/lk-jwt-service's GitHub release is tagged v0.7.0, but
     # ghcr.io/element-hq/lk-jwt-service publishes no matching "v0.7.0" (or any other semver) image
@@ -288,7 +307,10 @@ services:
     restart: unless-stopped
     logging: *default-logging
     profiles: ["calls"]
+    network_mode: "service:calls-proxy"
     depends_on:
+      calls-proxy:
+        condition: service_started
       livekit:
         condition: service_healthy
     environment:
@@ -299,19 +321,11 @@ services:
       # this service, which verifies it against LIVEKIT_CS_API_URL_OVERRIDES below. See
       # docs/DECISIONS.tsv.
       #
-      # This is the URL BOTH the browser (Element Call widget, for the actual call
-      # media/signalling) AND this service's OWN outbound room-management calls use -- it is
-      # baked into the LiveKit JWT this service mints, not just an internal address. Routed
-      # through Caddy's `/livekit/sfu/*` proxy (Caddyfile) rather than straight at
-      # `livekit:7880`/a raw host port, for two reasons: (1) it gets a real wss:// connection
-      # through Caddy's TLS cert for the browser, no plaintext-port/mixed-content workaround
-      # needed; (2) it's the only address this container can reach "PUBLIC_DOMAIN" at all from
-      # inside its own network namespace (see the "localhost server_name" gap in
-      # docs/CALLING.md) -- verified live, pointing this at the host-mapped LIVEKIT_PORT instead
-      # produced "tcp connect error: Connection refused" from inside this container. Needs the
-      # `prod`/`tls` profile up, same as the well-known discovery path.
-      # Public wss:// URL handed to CLIENTS in every /sfu/get reply (and also used by this service
-      # for its own room-management calls, through Caddy). Override with LIVEKIT_WS_URL in .env.
+      # LIVEKIT_URL is BOTH the address handed to clients in every /sfu/get reply AND the one
+      # this service uses for its own room-creation calls. scripts/setup.sh always exports
+      # LIVEKIT_WS_URL: wss://PUBLIC_DOMAIN/livekit/sfu (through the prod Caddy) when
+      # PUBLIC_BASE_URL is https, otherwise ws://<PUBLIC_BASE_URL host>:LIVEKIT_PORT (the SFU's
+      # own published port; calls-proxy forwards the same address for this service itself).
       LIVEKIT_URL: "${LIVEKIT_WS_URL:-wss://${PUBLIC_DOMAIN:-localhost}/livekit/sfu}"
       LIVEKIT_KEY: "${LIVEKIT_API_KEY}"
       LIVEKIT_SECRET: "${LIVEKIT_API_SECRET}"
@@ -327,19 +341,11 @@ services:
       # set explicitly rather than relying on discovery, same as element-call's own dev-compose.
       LIVEKIT_CS_API_URL_OVERRIDES: "${SERVER_NAME:-localhost}=http://synapse:8008"
       LIVEKIT_LOG_LEVEL: "info"
-      # Empty/unset by default (real TLS verification stays ON). ONLY set
-      # LIVEKIT_INSECURE_SKIP_VERIFY_TLS=YES_I_KNOW_WHAT_I_AM_DOING in deploy/.env for a LOCAL
-      # proof against Caddy's `CADDY_TLS_MODE=internal` self-signed cert -- lk-jwt-service verifies
-      # a client's OpenID token by calling back to Caddy over HTTPS (see docs/CALLING.md), and
-      # Caddy's internal-CA cert is not in lk-jwt-service's trust store. A real deployment with a
-      # real Let's Encrypt cert (issue #6's `prod` profile, `CADDY_TLS_MODE` blank) never needs
-      # this -- verified live: without it, the local self-signed proof fails with
-      # "UnknownIssuer" before it ever reaches the actual auth logic. Named after
-      # element-hq/element-call's own dev-compose, which sets this exact var for this exact
-      # reason.
+      # Empty by default (real TLS verification stays ON). scripts/setup.sh sets it ONLY when
+      # PUBLIC_BASE_URL is plain http (the no-TLS dev stack), where the OpenID check lands on
+      # calls-proxy's self-signed :8448. Also needed by hand for a CADDY_TLS_MODE=internal proof.
       LIVEKIT_INSECURE_SKIP_VERIFY_TLS: "${LIVEKIT_INSECURE_SKIP_VERIFY_TLS:-}"
-    ports:
-      - "${BIND_ADDR:-127.0.0.1}:${LIVEKIT_JWT_PORT:-8180}:8080"
+    # Port 8080 is published by calls-proxy (above), whose network namespace this shares.
     # No Docker HEALTHCHECK here: the image is a single static, shell-less Rust binary (no
     # wget/curl/sh at all -- verified live, `docker exec` of any of them fails with "executable
     # file not found in $PATH"), so a CMD-based healthcheck cannot run inside the container.
@@ -373,7 +379,6 @@ services:
       PUBLIC_DOMAIN: ${PUBLIC_DOMAIN}
       ELEMENT_DOMAIN: ${ELEMENT_DOMAIN}
       CADDY_TLS_MODE: ${CADDY_TLS_MODE:-}
-      LIVEKIT_SERVICE_URL: "${LIVEKIT_SERVICE_URL:-https://${PUBLIC_DOMAIN:-localhost}/livekit/jwt}"
       # ntfy's own hostname (issue #3, push). Needs its own DNS A record in production.
       NTFY_DOMAIN: "${NTFY_DOMAIN:-ntfy.${PUBLIC_DOMAIN:-localhost}}"
     volumes:

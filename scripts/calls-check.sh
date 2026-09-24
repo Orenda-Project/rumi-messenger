@@ -3,7 +3,7 @@
 # Falsifiable: with the "calls" profile down, every check below FAILs instead of silently
 # skipping -- this script does not special-case "not running" as a pass. Requires: bash, curl,
 # python3, docker. Run scripts/setup.sh first (it renders deploy/livekit/livekit.yaml even when
-# the "calls" profile is not up).
+# the "calls" profile is not up). Needs no Caddy on the dev stack.
 set -uo pipefail
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" >/dev/null 2>&1 && pwd)"
@@ -67,11 +67,14 @@ container_running() {
   [[ "$(docker inspect -f '{{.State.Running}}' "$1" 2>/dev/null)" == "true" ]] && echo 1 || echo 0
 }
 LIVEKIT_UP="$(container_running "${RUMI_CONTAINER_PREFIX}-livekit")"
-check "livekit container is running (docker compose --profile calls up -d)" "${LIVEKIT_UP}" \
+check "livekit container is running (scripts/setup.sh starts it unless CALLS=off)" "${LIVEKIT_UP}" \
   "container ${RUMI_CONTAINER_PREFIX}-livekit not found or not running"
 JWT_UP="$(container_running "${RUMI_CONTAINER_PREFIX}-lk-jwt-service")"
 check "lk-jwt-service container is running" "${JWT_UP}" \
   "container ${RUMI_CONTAINER_PREFIX}-lk-jwt-service not found or not running"
+PROXY_UP="$(container_running "${RUMI_CONTAINER_PREFIX}-calls-proxy")"
+check "calls-proxy container is running (lk-jwt-service's network namespace)" "${PROXY_UP}" \
+  "container ${RUMI_CONTAINER_PREFIX}-calls-proxy not found or not running"
 
 # ---------------------------------------------------------------------------
 # 2. LiveKit SFU answers on its signalling port.
@@ -107,33 +110,11 @@ GROUP_CALLS_OK=0; [[ "${GROUP_CALLS_FLAG}" == "True" ]] && GROUP_CALLS_OK=1
 check "Element config.json features.feature_group_calls == true" "${GROUP_CALLS_OK}" "got '${GROUP_CALLS_FLAG}'"
 
 # ---------------------------------------------------------------------------
-# 5. .well-known/matrix/client carries org.matrix.msc4143.rtc_foci -- served by Caddy (the
-#    "prod"/"tls" profile). Element Web reads this; Element X reads Synapse's own MSC4143
-#    /rtc/transports (check 7, on since round 2 via experimental_features.msc4143_enabled).
-#    Checked against https://PUBLIC_DOMAIN, so this FAILs honestly when "prod" is not up.
-# ---------------------------------------------------------------------------
-# CALLS_CHECK_RESOLVE=<domain>:443:127.0.0.1 lets a local test domain with no DNS be checked
-# (same trick as Chromium's --host-resolver-rules in docs/CALLING.md).
-RESOLVE_ARGS=(); [[ -n "${CALLS_CHECK_RESOLVE:-}" ]] && RESOLVE_ARGS=(--resolve "${CALLS_CHECK_RESOLVE}")
-WK_JSON="$(curl -fsSk "${RESOLVE_ARGS[@]}" "https://${PUBLIC_DOMAIN}/.well-known/matrix/client" 2>/dev/null || true)"
-RTC_FOCI_TYPE="$(python3 -c "
-import json,sys
-try:
-    d=json.loads(sys.argv[1])
-except Exception:
-    d={}
-foci = d.get('org.matrix.msc4143.rtc_foci', [])
-print(foci[0].get('type','') if foci else '')
-" "${WK_JSON}" 2>/dev/null)"
-RTC_FOCI_OK=0; [[ "${RTC_FOCI_TYPE}" == "livekit" ]] && RTC_FOCI_OK=1
-check "https://${PUBLIC_DOMAIN}/.well-known/matrix/client advertises org.matrix.msc4143.rtc_foci (needs the \"prod\"/\"tls\" profile up)" "${RTC_FOCI_OK}" \
-  "no livekit rtc_foci entry found -- is 'docker compose --profile prod up -d caddy' running?"
-
-# ---------------------------------------------------------------------------
-# 6-8. What CLIENTS are told must be publicly reachable (round 2, Android OPEN_ID_ERROR): a phone
-#      cannot resolve the Docker-internal names "lk-jwt-service"/"livekit", so neither Synapse's
-#      MSC4143 transports reply, nor the .well-known rtc_foci entry, nor the wss:// URL
-#      lk-jwt-service hands out in every /sfu/get reply may contain them.
+# 5-8. What CLIENTS are told, and that it actually works. Synapse's MSC4143 /rtc/transports is the
+#      one discovery path both apps read (setup.sh writes it only when it started the calls
+#      services). The URL must not be a Docker-internal name (a phone cannot resolve
+#      "lk-jwt-service"), it must ANSWER, and a real OpenID token must get a LiveKit JWT from it --
+#      the exact step that failed as OPEN_ID_ERROR / "Failed to authenticate to transport".
 # ---------------------------------------------------------------------------
 SYNAPSE_URL="http://${BIND_ADDR}:${SYNAPSE_PORT:-8008}"
 is_public_url() {  # prints 1 if $1 is a non-empty http(s)/ws(s) URL with no docker-internal host
@@ -141,17 +122,19 @@ is_public_url() {  # prints 1 if $1 is a non-empty http(s)/ws(s) URL with no doc
 import sys, urllib.parse
 u = sys.argv[1]
 h = (urllib.parse.urlsplit(u).hostname or '') if u else ''
-internal = {'lk-jwt-service', 'livekit', 'synapse', 'caddy', 'element', ''}
+internal = {'lk-jwt-service', 'livekit', 'synapse', 'caddy', 'element', 'calls-proxy', ''}
 print(1 if u and h not in internal and not h.startswith('rumi-') else 0)
 " "$1" 2>/dev/null
 }
 ADMIN_TOKEN="$(curl -s -X POST "${SYNAPSE_URL}/_matrix/client/v3/login" -H 'Content-Type: application/json' \
   -d "{\"type\":\"m.login.password\",\"identifier\":{\"type\":\"m.id.user\",\"user\":\"${ADMIN_USER:-admin}\"},\"password\":\"${ADMIN_PASSWORD:-}\"}" 2>/dev/null \
   | python3 -c 'import json,sys;print(json.load(sys.stdin).get("access_token",""))' 2>/dev/null)"
-TRANSPORTS_JSON=""
+TRANSPORTS_JSON=""; OPENID_JSON=""
 if [[ -n "${ADMIN_TOKEN}" ]]; then
   TRANSPORTS_JSON="$(curl -s -H "Authorization: Bearer ${ADMIN_TOKEN}" \
     "${SYNAPSE_URL}/_matrix/client/unstable/org.matrix.msc4143/rtc/transports" 2>/dev/null || true)"
+  OPENID_JSON="$(curl -s -X POST -H "Authorization: Bearer ${ADMIN_TOKEN}" -H 'Content-Type: application/json' -d '{}' \
+    "${SYNAPSE_URL}/_matrix/client/v3/user/%40${ADMIN_USER:-admin}%3A${SERVER_NAME}/openid/request_token" 2>/dev/null || true)"
   # Log the check's own session out again so repeated runs don't pile up admin devices.
   curl -s -o /dev/null -X POST -H "Authorization: Bearer ${ADMIN_TOKEN}" "${SYNAPSE_URL}/_matrix/client/v3/logout" 2>/dev/null || true
 fi
@@ -165,22 +148,29 @@ t=[x for x in d.get('rtc_transports',[]) if x.get('type')=='livekit']
 print(t[0].get('livekit_service_url','') if t else '')
 " "${TRANSPORTS_JSON}" 2>/dev/null)"
 check "Synapse MSC4143 /rtc/transports gives clients a PUBLIC livekit_service_url" "$(is_public_url "${TRANSPORT_URL}")" \
-  "got '${TRANSPORT_URL:-<none>}' (raw: ${TRANSPORTS_JSON:0:160}) -- re-run scripts/setup.sh; never lk-jwt-service:8080"
+  "got '${TRANSPORT_URL:-<none>}' (raw: ${TRANSPORTS_JSON:0:160}) -- re-run scripts/setup.sh (CALLS=off advertises nothing)"
 
-WK_URL="$(python3 -c "
+# CALLS_CHECK_RESOLVE=<domain>:443:127.0.0.1 lets a local test domain with no DNS be checked.
+RESOLVE_ARGS=(); [[ -n "${CALLS_CHECK_RESOLVE:-}" ]] && RESOLVE_ARGS=(--resolve "${CALLS_CHECK_RESOLVE}")
+HZ_CODE="000"
+[[ -n "${TRANSPORT_URL}" ]] && HZ_CODE="$(curl -sk "${RESOLVE_ARGS[@]}" -o /dev/null -w '%{http_code}' --max-time 5 "${TRANSPORT_URL%/}/healthz" 2>/dev/null || true)"
+HZ_OK=0; [[ "${HZ_CODE}" == "200" ]] && HZ_OK=1
+check "the advertised transport URL answers from this host (${TRANSPORT_URL:-<none>}/healthz)" "${HZ_OK}" "HTTP ${HZ_CODE} -- clients are being sent to a dead address"
+
+SFU_JSON=""
+if [[ -n "${TRANSPORT_URL}" && -n "${OPENID_JSON}" ]]; then
+  SFU_BODY="$(python3 -c "
 import json,sys
-try:
-    d=json.loads(sys.argv[1])
-except Exception:
-    d={}
-f=d.get('org.matrix.msc4143.rtc_foci',[])
-print(f[0].get('livekit_service_url','') if f else '')
-" "${WK_JSON}" 2>/dev/null)"
-check ".well-known rtc_foci livekit_service_url is PUBLIC" "$(is_public_url "${WK_URL}")" "got '${WK_URL:-<none>}'"
-
-JWT_CONTAINER="${RUMI_CONTAINER_PREFIX}-lk-jwt-service"
-WS_URL="$(docker inspect -f '{{range .Config.Env}}{{println .}}{{end}}' "${JWT_CONTAINER}" 2>/dev/null | sed -n 's/^LIVEKIT_URL=//p')"
-check "lk-jwt-service hands clients a PUBLIC LiveKit wss:// URL" "$(is_public_url "${WS_URL}")" "got '${WS_URL:-<none>}'"
+o=json.loads(sys.argv[1])
+print(json.dumps({'room':'!calls-check:'+sys.argv[2],'device_id':'CALLSCHECK','openid_token':o}))
+" "${OPENID_JSON}" "${SERVER_NAME}" 2>/dev/null)"
+  SFU_JSON="$(curl -sk "${RESOLVE_ARGS[@]}" --max-time 40 -X POST -H 'Content-Type: application/json' -d "${SFU_BODY}" "${TRANSPORT_URL%/}/sfu/get" 2>/dev/null || true)"
+fi
+SFU_JWT="$(json_field "${SFU_JSON}" jwt)"
+WS_URL="$(json_field "${SFU_JSON}" url)"
+check "a real OpenID token gets a LiveKit JWT from the advertised transport (no OPEN_ID_ERROR)" "$([[ -n "${SFU_JWT}" ]] && echo 1 || echo 0)" \
+  "POST ${TRANSPORT_URL:-<none>}/sfu/get -> ${SFU_JSON:0:200}"
+check "lk-jwt-service hands clients a PUBLIC LiveKit ws(s):// URL" "$(is_public_url "${WS_URL}")" "got '${WS_URL:-<none>}'"
 
 # ---------------------------------------------------------------------------
 # 9. Members may JOIN a call: new rooms get org.matrix.msc3401.call.member at power level 0.

@@ -6,7 +6,7 @@
 #
 # By design, several checks only make sense (and only PASS) once the `prod`/`tls` Caddy profile is
 # up against a real or `CADDY_TLS_MODE=internal` domain -- they correctly FAIL against the plain
-# dev stack (no Caddy, no TLS, open registration by default). That is the falsifiable proof this
+# dev stack (no Caddy, no TLS). That is the falsifiable proof this
 # script does something real, not a script that always prints PASS.
 set -uo pipefail
 
@@ -31,7 +31,7 @@ BIND_ADDR="${BIND_ADDR:-127.0.0.1}"
 SYNAPSE_PORT="${SYNAPSE_PORT:-8008}"
 ELEMENT_PORT="${ELEMENT_PORT:-8082}"
 RUMI_CONTAINER_PREFIX="${RUMI_CONTAINER_PREFIX:-rumi}"
-REGISTRATION_MODE="${REGISTRATION_MODE:-open}"
+REGISTRATION_MODE="${REGISTRATION_MODE:-token}"
 # --resolve target for curl when PUBLIC_DOMAIN/ELEMENT_DOMAIN have no real DNS yet (local proof
 # with CADDY_TLS_MODE=internal) -- default 127.0.0.1, override for a real box mid-cutover.
 PROD_CHECK_RESOLVE_IP="${PROD_CHECK_RESOLVE_IP:-127.0.0.1}"

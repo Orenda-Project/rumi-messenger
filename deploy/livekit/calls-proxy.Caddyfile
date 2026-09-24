@@ -1,0 +1,23 @@
+# calls-proxy (deploy/docker-compose.yml): lk-jwt-service runs inside this container's network
+# namespace, so for lk-jwt-service "localhost" means this Caddy. Static file, committed.
+{
+	admin off
+	skip_install_trust
+	auto_https disable_redirects
+	default_sni localhost
+}
+
+# lk-jwt-service's OpenID check for SERVER_NAME=localhost falls back to https://localhost:8448
+# (federation discovery). Only the one userinfo endpoint is forwarded; everything else is 404.
+https://localhost:8448 {
+	tls internal
+	handle /_matrix/federation/v1/openid/userinfo {
+		reverse_proxy synapse:8008
+	}
+	respond 404
+}
+
+# lk-jwt-service's own room-creation calls use the same ws://localhost:LIVEKIT_PORT it hands clients.
+http://:{$LIVEKIT_PORT} {
+	reverse_proxy livekit:7880
+}

@@ -41,7 +41,7 @@ fill_env_var() {
 # `SYNAPSE_PORT=8208 ELEMENT_PORT=8283 scripts/setup.sh`). These must win over both a freshly
 # copied .env.example AND an existing deploy/.env -- otherwise `source`-ing the file below would
 # silently clobber the caller's exported values back to whatever the file says.
-OVERRIDE_VARS=(SERVER_NAME PUBLIC_BASE_URL SYNAPSE_PORT ELEMENT_PORT BIND_ADDR REGISTRATION_MODE COMPOSE_PROJECT_NAME RUMI_CONTAINER_PREFIX TURN_PORT TURN_MIN_PORT TURN_MAX_PORT PUBLIC_DOMAIN ELEMENT_DOMAIN CADDY_TLS_MODE BACKUP_KEEP_N LIVEKIT_PORT LIVEKIT_RTC_TCP_PORT LIVEKIT_RTC_UDP_MIN LIVEKIT_RTC_UDP_MAX LIVEKIT_JWT_PORT LIVEKIT_SERVICE_URL LIVEKIT_NODE_IP)
+OVERRIDE_VARS=(SERVER_NAME PUBLIC_BASE_URL SYNAPSE_PORT ELEMENT_PORT BIND_ADDR REGISTRATION_MODE COMPOSE_PROJECT_NAME RUMI_CONTAINER_PREFIX TURN_PORT TURN_MIN_PORT TURN_MAX_PORT PUBLIC_DOMAIN ELEMENT_DOMAIN CADDY_TLS_MODE BACKUP_KEEP_N LIVEKIT_PORT LIVEKIT_RTC_TCP_PORT LIVEKIT_RTC_UDP_MIN LIVEKIT_RTC_UDP_MAX LIVEKIT_JWT_PORT LIVEKIT_SERVICE_URL LIVEKIT_WS_URL LIVEKIT_NODE_IP CALLS)
 for _v in "${OVERRIDE_VARS[@]}"; do
   eval "PRESET_${_v}=\"\${${_v}:-}\""
 done
@@ -130,7 +130,9 @@ SYNAPSE_PORT="${SYNAPSE_PORT:-8008}"
 ELEMENT_PORT="${ELEMENT_PORT:-8082}"
 BIND_ADDR="${BIND_ADDR:-127.0.0.1}"
 ADMIN_USER="${ADMIN_USER:-admin}"
-REGISTRATION_MODE="${REGISTRATION_MODE:-open}"
+# token by default: a school server is closed -- the admin creates teacher accounts
+# (scripts/teacher.sh, shared-secret registrar); nobody signs themselves up from the login screen.
+REGISTRATION_MODE="${REGISTRATION_MODE:-token}"
 TURN_PORT="${TURN_PORT:-3478}"
 TURN_MIN_PORT="${TURN_MIN_PORT:-49152}"
 TURN_MAX_PORT="${TURN_MAX_PORT:-65535}"
@@ -147,34 +149,45 @@ PUBLIC_DOMAIN="${PUBLIC_DOMAIN:-${SERVER_NAME}}"
 ELEMENT_DOMAIN="${ELEMENT_DOMAIN:-${PUBLIC_DOMAIN}}"
 CADDY_TLS_MODE="${CADDY_TLS_MODE:-}"
 BACKUP_KEEP_N="${BACKUP_KEEP_N:-14}"
-# Group calls (issue #2): the lk-jwt-service address CLIENTS are told to use (Synapse's
-# matrix_rtc.transports below + Caddy's .well-known rtc_foci). Must be publicly reachable -- a
-# phone cannot resolve the Docker-internal name "lk-jwt-service", which is exactly what the Android
-# test hit (OPEN_ID_ERROR in the call lobby). Default: Caddy's /livekit/jwt route on
-# PUBLIC_DOMAIN. Deliberately NOT written into deploy/.env, so changing PUBLIC_DOMAIN later keeps
-# it in step; set it in deploy/.env only to point somewhere else. Server-to-server traffic
-# (LiveKit's webhook to lk-jwt-service) keeps using the container name.
-LIVEKIT_SERVICE_URL="${LIVEKIT_SERVICE_URL:-https://${PUBLIC_DOMAIN}/livekit/jwt}"
-case "${LIVEKIT_SERVICE_URL}" in
-  *lk-jwt-service*|*://localhost*|*://127.*)
-    log "  WARNING: LIVEKIT_SERVICE_URL=${LIVEKIT_SERVICE_URL} is not reachable from a phone -- group calls only work from this machine (see docs/CALLING.md)" ;;
+# The host clients reach this server at (e.g. "localhost", or "chat.yourschool.org"): the hostname
+# half of PUBLIC_BASE_URL. Used for the TURN URIs (step 3) and the call URLs just below.
+CLIENT_HOST="$(python3 -c "
+import sys, urllib.parse
+print(urllib.parse.urlsplit(sys.argv[1]).hostname or 'localhost')
+" "${PUBLIC_BASE_URL}")"
+TURN_HOST="${CLIENT_HOST}"
+# Calls (issues #1 + #2): LiveKit + lk-jwt-service are part of the default stack (CALLS=off to
+# leave them out). Element X can ONLY call through Element Call, so without them the phone app can
+# never call anyone. Whatever URL goes into Synapse's matrix_rtc.transports (step 3) is what every
+# client is sent to, so it must be one the client can reach AND a service this run started:
+#   - https PUBLIC_BASE_URL (prod Caddy): https://PUBLIC_DOMAIN/livekit/jwt + wss://PUBLIC_DOMAIN/livekit/sfu
+#   - http PUBLIC_BASE_URL (no-TLS dev stack): lk-jwt-service's and LiveKit's own published ports,
+#     http://CLIENT_HOST:LIVEKIT_JWT_PORT + ws://CLIENT_HOST:LIVEKIT_PORT -- no Caddy needed. An
+#     Android emulator reaches them with `adb reverse` (docs/CALLING.md).
+# Derived every run (not written to deploy/.env) so they follow PUBLIC_BASE_URL; a value set in
+# deploy/.env or exported wins. Never the Docker-internal "lk-jwt-service"/"livekit" names.
+CALLS="${CALLS:-on}"
+case "${PUBLIC_BASE_URL}" in
+  https://*)
+    LIVEKIT_SERVICE_URL="${LIVEKIT_SERVICE_URL:-https://${PUBLIC_DOMAIN}/livekit/jwt}"
+    LIVEKIT_WS_URL="${LIVEKIT_WS_URL:-wss://${PUBLIC_DOMAIN}/livekit/sfu}" ;;
+  *)
+    LIVEKIT_SERVICE_URL="${LIVEKIT_SERVICE_URL:-http://${CLIENT_HOST}:${LIVEKIT_JWT_PORT}}"
+    LIVEKIT_WS_URL="${LIVEKIT_WS_URL:-ws://${CLIENT_HOST}:${LIVEKIT_PORT}}"
+    # No TLS anywhere on this stack: lk-jwt-service's OpenID check lands on calls-proxy's
+    # self-signed https://localhost:8448 (docker-compose.yml), so it must not verify that cert.
+    LIVEKIT_INSECURE_SKIP_VERIFY_TLS="${LIVEKIT_INSECURE_SKIP_VERIFY_TLS:-YES_I_KNOW_WHAT_I_AM_DOING}" ;;
 esac
-# Optional: the IP LiveKit advertises in its ICE candidates. Blank = the container's own bridge
-# IP, which only this host can reach. A real deployment sets the server's LAN/public IP.
+export LIVEKIT_SERVICE_URL LIVEKIT_WS_URL LIVEKIT_INSECURE_SKIP_VERIFY_TLS="${LIVEKIT_INSECURE_SKIP_VERIFY_TLS:-}"
+case "${LIVEKIT_SERVICE_URL} ${LIVEKIT_WS_URL}" in
+  *lk-jwt-service*|*//livekit[:/]*)
+    log "  ERROR: call URLs must be reachable by clients, not Docker-internal names: ${LIVEKIT_SERVICE_URL} ${LIVEKIT_WS_URL}"; exit 1 ;;
+esac
 LIVEKIT_NODE_IP="${LIVEKIT_NODE_IP:-}"
 fill_env_var PUBLIC_DOMAIN "${PUBLIC_DOMAIN}"
 fill_env_var ELEMENT_DOMAIN "${ELEMENT_DOMAIN}"
 fill_env_var CADDY_TLS_MODE "${CADDY_TLS_MODE}"
 fill_env_var BACKUP_KEEP_N "${BACKUP_KEEP_N}"
-# The address Matrix clients (Element Web running in a teacher's browser) are told to open a
-# TURN connection to -- must be something those clients can actually reach, same requirement as
-# PUBLIC_BASE_URL itself, so we derive it from the same setting rather than inventing a second
-# one: the hostname half of PUBLIC_BASE_URL (e.g. "localhost", or "chat.yourschool.org" in
-# production).
-TURN_HOST="$(python3 -c "
-import sys, urllib.parse
-print(urllib.parse.urlsplit(sys.argv[1]).hostname or 'localhost')
-" "${PUBLIC_BASE_URL}")"
 
 # ---------------------------------------------------------------------------
 # Step 2: generate homeserver.yaml if absent
@@ -201,6 +214,7 @@ dc run --rm \
   -e TURN_PORT="${TURN_PORT}" \
   -e TURN_SHARED_SECRET="${TURN_SHARED_SECRET}" \
   -e LIVEKIT_SERVICE_URL="${LIVEKIT_SERVICE_URL}" \
+  -e CALLS="${CALLS}" \
   --entrypoint python3 synapse - <<'PYEOF'
 import os, yaml
 
@@ -312,17 +326,19 @@ for listener in config.get("listeners", []):
             names.append("openid")
         res["names"] = names
 
-# Group calls (issue #2): MSC4143 RTC transport discovery. Synapse v1.161.0 serves
-# GET /_matrix/client/unstable/org.matrix.msc4143/rtc/transports once the experimental flag is on
-# (verified live: /versions then reports "org.matrix.msc4143": true). Element X (Android) reads
-# THIS endpoint, not the .well-known, so the URL here must be the public one -- never
-# "http://lk-jwt-service:8080", which only resolves inside the Docker network.
-config.setdefault("experimental_features", {})["msc4143_enabled"] = True
-config["matrix_rtc"] = {
-    "transports": [
-        {"type": "livekit", "livekit_service_url": os.environ["LIVEKIT_SERVICE_URL"]},
-    ]
-}
+# Calls (issue #2): MSC4143 RTC transport discovery -- the ONE place both apps (Element X and
+# Element Web's Element Call widget) learn where the calls backend is. Written only when this run
+# starts LiveKit (CALLS != off); otherwise removed, so no client is ever sent to a dead address.
+if os.environ["CALLS"] != "off":
+    config.setdefault("experimental_features", {})["msc4143_enabled"] = True
+    config["matrix_rtc"] = {
+        "transports": [
+            {"type": "livekit", "livekit_service_url": os.environ["LIVEKIT_SERVICE_URL"]},
+        ]
+    }
+else:
+    config.setdefault("experimental_features", {})["msc4143_enabled"] = False
+    config.pop("matrix_rtc", None)
 
 # Group calls (issue #2): joining an Element Call means sending an
 # `org.matrix.msc3401.call.member` STATE event. Synapse's default room power levels put every
@@ -506,10 +522,8 @@ docker run --rm --user root --entrypoint sh \
 log "  wrote deploy/coturn/turnserver.conf (listening-ip=${BIND_ADDR}, realm=${SERVER_NAME}, turn_uris host=${TURN_HOST})"
 
 # ---------------------------------------------------------------------------
-# Step 5b: LiveKit SFU config (group calls + screen sharing, issue #2). Rendered unconditionally
-# (cheap, same as coturn's config above) but the livekit/lk-jwt-service CONTAINERS only actually
-# start when the "calls" profile is explicitly requested -- see docs/CALLING.md and
-# scripts/calls-check.sh.
+# Step 5b: LiveKit SFU config (calls, issues #1 + #2). Rendered unconditionally (cheap); the
+# containers are started in step 6 unless CALLS=off -- see docs/CALLING.md.
 # ---------------------------------------------------------------------------
 log "Step 5b: LiveKit SFU config (group calls, issue #2)"
 LIVEKIT_DIR="${DEPLOY_DIR}/livekit"
@@ -552,7 +566,8 @@ mkdir -p "${LIVEKIT_DIR}"
   echo "webhook:"
   echo "  api_key: ${LIVEKIT_API_KEY}"
   echo "  urls:"
-  echo "    - \"http://lk-jwt-service:8080/sfu_webhook\""
+  # lk-jwt-service lives in calls-proxy's network namespace (docker-compose.yml).
+  echo "    - \"http://calls-proxy:8080/sfu_webhook\""
 } > "${LIVEKIT_DIR}/livekit.yaml"
 chmod 600 "${LIVEKIT_DIR}/livekit.yaml"
 log "  wrote deploy/livekit/livekit.yaml (port=${LIVEKIT_PORT}, rtc udp ${LIVEKIT_RTC_UDP_MIN}-${LIVEKIT_RTC_UDP_MAX})"
@@ -579,6 +594,15 @@ dc restart synapse
 # start. A prior run of this exact script hit precisely that: coturn kept running for 2+ minutes
 # on a config it couldn't even read, discovered live while writing this script.
 dc up -d --force-recreate coturn
+# Calls (issues #1 + #2): on by default. --force-recreate for the same stale-config reason as
+# coturn (livekit.yaml was just re-rendered, and the call URLs above may have changed).
+if [[ "${CALLS}" != "off" ]]; then
+  log "  starting calls: livekit + calls-proxy + lk-jwt-service (CALLS=off to leave them out)"
+  dc --profile calls up -d --force-recreate --wait livekit calls-proxy lk-jwt-service
+else
+  log "  CALLS=off: calls not started and not advertised"
+  dc --profile calls rm -sf livekit lk-jwt-service calls-proxy >/dev/null 2>&1 || true
+fi
 
 log "  waiting for Synapse /_matrix/client/versions"
 for i in $(seq 1 60); do
@@ -830,6 +854,15 @@ if [[ ! -f "${CONFIG_TEMPLATE}" ]]; then
 TPLEOF
 fi
 render_template "${CONFIG_TEMPLATE}" "${ELEMENT_DIR}/config.json"
+if [[ "${CALLS}" == "off" ]]; then
+  # No calls backend: hide Element Call so the web app offers only legacy 1:1 calls (coturn).
+  python3 - "${ELEMENT_DIR}/config.json" <<'PYEOF'
+import json, sys
+p = sys.argv[1]; c = json.load(open(p))
+c.setdefault("features", {}).update(feature_group_calls=False, feature_element_call_video_rooms=False)
+json.dump(c, open(p, "w"), indent=2)
+PYEOF
+fi
 if [[ "${CLEANUP_CONFIG_TEMPLATE}" == "1" ]]; then
   rm -f "${CONFIG_TEMPLATE}"
 fi
@@ -892,6 +925,11 @@ echo " Element Web:   http://${BIND_ADDR}:${ELEMENT_PORT}"
 echo " Synapse:       http://${BIND_ADDR}:${SYNAPSE_PORT}"
 echo " TURN (calls):  ${TURN_HOST}:${TURN_PORT} (udp+tcp), relay ports ${TURN_MIN_PORT}-${TURN_MAX_PORT}"
 echo "                plaintext only (no-tls; DTLS off by default) until issue #6; see docs/RUNBOOK.md"
+if [[ "${CALLS}" != "off" ]]; then
+  echo " Calls:         ${LIVEKIT_SERVICE_URL} (lk-jwt) + ${LIVEKIT_WS_URL} (LiveKit), media ${LIVEKIT_RTC_TCP_PORT}/tcp + ${LIVEKIT_RTC_UDP_MIN}-${LIVEKIT_RTC_UDP_MAX}/udp"
+else
+  echo " Calls:         off (CALLS=off) -- the phone app cannot call; web offers legacy 1:1 only"
+fi
 echo " Server name:   ${SERVER_NAME}"
 echo
 echo " Admin account:   ${ADMIN_USER}"

@@ -1,10 +1,25 @@
-# Group Calls + Screen Sharing (issue #2)
+# Calls: 1:1, group, screen sharing (issues #1 + #2)
 
-1:1 calls (issue #1) are peer-to-peer through coturn -- see `docs/RUNBOOK.md`'s "Calls" section.
-Group calls (3+ participants) and screen sharing are a different mechanism: Element Web's
-built-in Element Call widget, backed by a **LiveKit** SFU (Selective Forwarding Unit) that
-actually mixes/forwards media, authorized through **lk-jwt-service** per
-[MSC4195](https://github.com/matrix-org/matrix-spec-proposals/pull/4195).
+**On by default.** `scripts/setup.sh` starts the calls server and tells the apps where it is. There
+are two call mechanisms:
+
+- **Element Call** (LiveKit SFU + lk-jwt-service, per
+  [MSC4195](https://github.com/matrix-org/matrix-spec-proposals/pull/4195)). The phone app (our
+  Element X fork) has **no other way to call**: every call from the phone, 1:1 included, is an
+  Element Call. The web app uses it too when a teacher picks "Element Call", and for group calls and
+  screen sharing.
+- **Legacy 1:1 calls** (peer-to-peer WebRTC through coturn), web app only ("Legacy Call"). See
+  `docs/RUNBOOK.md`'s "Calls" section.
+
+`CALLS=off` (in `deploy/.env` or exported) leaves LiveKit out, removes the advertisement from
+Synapse and hides Element Call in the web app. The phone app then cannot call at all.
+
+**No internet dependency for the call UI.** Both apps ship Element Call inside themselves: the phone
+app loads its embedded copy from `https://appassets.androidplatform.net/element-call/index.html`
+(Element X's `element-call-embedded` package, see the fork's `docs/element_call.md`; the base URL
+is only overridden in hidden developer options), and Element Web 1.12.29 serves its own copy at
+`/widgets/element-call/`. Nothing is loaded from `call.element.io`; no self-hosted element-call
+container is needed.
 
 ## Why LiveKit + lk-jwt-service, not Jitsi
 
@@ -26,37 +41,59 @@ it itself. That's what this deployment uses. See `docs/DECISIONS.tsv`.
 ## Architecture
 
 ```
-Element Web / Element X (phone)
-   |  1. discover the calls backend -- BOTH paths hand out the same PUBLIC URL (LIVEKIT_SERVICE_URL,
-   |     default https://{PUBLIC_DOMAIN}/livekit/jwt):
-   |       - Synapse  GET /_matrix/client/unstable/org.matrix.msc4143/rtc/transports  (Element X reads this)
-   |       - Caddy    GET /.well-known/matrix/client -> org.matrix.msc4143.rtc_foci  (Element Web reads this)
-   |  2. POST https://{PUBLIC_DOMAIN}/livekit/jwt/sfu/get  (OpenID token from Synapse)  -- Caddy, prefix stripped
+Element X (phone) / Element Web's Element Call widget
+   |  1. discover: Synapse GET /_matrix/client/unstable/org.matrix.msc4143/rtc/transports
+   |     -> livekit_service_url = LIVEKIT_SERVICE_URL (both apps read THIS; setup.sh writes it only
+   |        when it started LiveKit)
+   |  2. POST <LIVEKIT_SERVICE_URL>/sfu/get with an OpenID token from Synapse
    v
-lk-jwt-service -- verifies the OpenID token via GET https://{PUBLIC_DOMAIN}/_matrix/federation/v1/openid/userinfo
-   |              (Synapse's stand-alone `openid` resource; the rest of federation stays unserved, issue #8)
-   |  replies {url: wss://{PUBLIC_DOMAIN}/livekit/sfu, jwt}   (LIVEKIT_WS_URL -- also public)
+lk-jwt-service (inside calls-proxy's network namespace)
+   |  verifies the token: https://<server_name>/.well-known/matrix/server, else
+   |  https://<server_name>:8448 -> /_matrix/federation/v1/openid/userinfo (Synapse's stand-alone
+   |  `openid` resource; the rest of federation stays unserved, issue #8)
+   |  creates the LiveKit room via LIVEKIT_URL, replies {url: LIVEKIT_WS_URL, jwt}
    v
-LiveKit SFU <-- signalling: wss://{PUBLIC_DOMAIN}/livekit/sfu (Caddy, real TLS)
-            <-- media: UDP LIVEKIT_RTC_UDP_MIN-MAX / TCP LIVEKIT_RTC_TCP_PORT, DIRECT to the server
-                (LIVEKIT_MEDIA_BIND_ADDR + LIVEKIT_NODE_IP, see "Production" below)
+LiveKit SFU <-- signalling: LIVEKIT_WS_URL
+            <-- media: UDP LIVEKIT_RTC_UDP_MIN-MAX / TCP LIVEKIT_RTC_TCP_PORT, direct to the server
 ```
 
-Docker-internal names (`lk-jwt-service:8080`, `livekit:7880`, `synapse:8008`) are used only for
-server-to-server hops (Caddy's upstreams, LiveKit's webhook). **A client must never be handed
-one**: a phone cannot resolve them. That is exactly what the Android run hit -- the dev stack's
-hand-edited Synapse config advertised `http://lk-jwt-service:8080`, and Element X showed
-OPEN_ID_ERROR in the call lobby. `scripts/calls-check.sh` now fails on that value (checks 7-9).
+What setup.sh hands clients, derived from `PUBLIC_BASE_URL` every run (a value set in
+`deploy/.env` wins):
 
-Compose services: `livekit` (the SFU) and `lk-jwt-service` (the auth bridge), both behind the
-`calls` profile. `scripts/setup.sh` renders `deploy/livekit/livekit.yaml` (gitignored) and patches
-Synapse's `homeserver.yaml` with:
+| Stack | `LIVEKIT_SERVICE_URL` (lk-jwt) | `LIVEKIT_WS_URL` (LiveKit) |
+|---|---|---|
+| plain http (dev, default `localhost`) | `http://<host>:LIVEKIT_JWT_PORT` (8180) | `ws://<host>:LIVEKIT_PORT` (7880) |
+| https (`prod` Caddy, real domain) | `https://PUBLIC_DOMAIN/livekit/jwt` | `wss://PUBLIC_DOMAIN/livekit/sfu` |
+
+`<host>` is the hostname in `PUBLIC_BASE_URL`, the same one the TURN URIs use.
+
+**calls-proxy** (a small Caddy, `deploy/livekit/calls-proxy.Caddyfile`) exists for the default
+`SERVER_NAME=localhost` stack. lk-jwt-service does both of its own lookups from inside its
+container: the OpenID check (always HTTPS federation discovery for the server name) and room
+creation (the same `LIVEKIT_URL` it hands clients). With `localhost` both would hit lk-jwt-service
+itself. It therefore runs in calls-proxy's network namespace, where `localhost:8448` is a
+self-signed TLS proxy to Synapse's one userinfo endpoint and `localhost:LIVEKIT_PORT` forwards to
+the SFU. On the plain-http stack setup.sh sets `LIVEKIT_INSECURE_SKIP_VERIFY_TLS` for that
+self-signed hop only (there is no TLS anywhere on that stack). On a real domain these lookups
+resolve to the prod Caddy exactly as before. calls-proxy also publishes lk-jwt-service's port.
+
+**Why the QA critic saw OPEN_ID_ERROR (2026-09-24, confirmed live).** Commit 50216bd made setup.sh
+always advertise `https://PUBLIC_DOMAIN/livekit/jwt`, but the default stack started neither the
+`calls` services nor the `prod` Caddy. Every client was sent to `https://localhost/livekit/jwt`,
+where nothing listens: the phone showed a dark call screen then OPEN_ID_ERROR, the web console
+logged `Failed to authenticate to transport https://localhost/livekit/jwt`. `calls-check.sh` on
+that stack: 4 passed, 8 failed; the new e2e check failed with HTTP 000.
+
+The Caddy `.well-known/matrix/client` no longer carries `org.matrix.msc4143.rtc_foci`: Synapse's
+`/rtc/transports` is the single discovery source, so `CALLS=off` can never leave a stale address.
+
+Synapse settings setup.sh writes:
 
 | Setting | Why |
 |---|---|
-| `experimental_features.msc4143_enabled: true` + `matrix_rtc.transports` | Synapse v1.161.0 DOES serve MSC4143 `/rtc/transports` once the flag is on (round 1 said it could not; it had tested without the flag). Element X discovers the SFU here. |
-| `default_power_level_content_override` (all presets): `org.matrix.msc3401.call.member: 0` | Joining a call sends a `call.member` STATE event; the default `state_default: 50` makes that 403 for an ordinary teacher. Root cause of round 1's second-participant abort (below). Same value Element Web uses when it creates a room itself. |
-| `max_event_delay_duration: 24h` (MSC4140 delayed events) | Element Call schedules a server-side "leave" it keeps refreshing; if a phone dies, Synapse sends it. Without this a dead client stays as a "Waiting for media..." ghost tile for hours. |
+| `experimental_features.msc4143_enabled` + `matrix_rtc.transports` (only when CALLS is on) | Synapse v1.161.0 serves MSC4143 `/rtc/transports` with the flag on. Both apps discover the SFU here. |
+| `default_power_level_content_override` (all presets): `org.matrix.msc3401.call.member: 0` | Joining a call sends a `call.member` STATE event; the default `state_default: 50` makes that 403 for an ordinary teacher (round 1's second-participant abort, below). |
+| `max_event_delay_duration: 24h` (MSC4140 delayed events) | Element Call schedules a server-side "leave" it keeps refreshing; if a phone dies, Synapse sends it, so no "Waiting for media..." ghost tile. |
 
 ## Why the second participant was dropped in round 1 (root cause, reproduced + fixed in round 2)
 
@@ -86,87 +123,63 @@ room's admin via the API: `PUT /_matrix/client/v3/rooms/<room>/state/m.room.powe
 ## Bringing it up
 
 ```bash
-scripts/setup.sh                                    # renders livekit.yaml, patches homeserver.yaml
-docker compose --profile calls --profile prod up -d livekit lk-jwt-service caddy
-scripts/calls-check.sh                              # 11 falsifiable checks, see "Verifying"
+scripts/setup.sh          # starts livekit + calls-proxy + lk-jwt-service unless CALLS=off
+scripts/calls-check.sh    # 12 falsifiable checks, see "Verifying"
 ```
 
-`CADDY_TLS_MODE=internal` in `deploy/.env` gives a local self-signed proof (no public DNS); leave
-it blank for a real domain (Let's Encrypt, issue #6). With a self-signed cert lk-jwt-service also
-needs `LIVEKIT_INSECURE_SKIP_VERIFY_TLS=YES_I_KNOW_WHAT_I_AM_DOING` (local proofs only).
+Ports on the default stack (all on `BIND_ADDR`, 127.0.0.1 by default):
+
+| Port | What | Who connects |
+|---|---|---|
+| 8180/tcp (`LIVEKIT_JWT_PORT`) | lk-jwt-service (published by calls-proxy) | the apps, for the call token |
+| 7880/tcp (`LIVEKIT_PORT`) | LiveKit signalling (ws) | the apps |
+| 7881/tcp (`LIVEKIT_RTC_TCP_PORT`) | LiveKit media over TCP | the apps, when UDP is not possible |
+| 50100-50200/udp | LiveKit media | the apps |
+| 3478/tcp+udp | coturn | web app legacy 1:1 calls |
+
+### Android emulator on the dev stack
+
+The emulator's `localhost` is the emulator itself. Forward the TCP ports to the host:
+
+```bash
+adb reverse tcp:8108 tcp:8108   # Synapse (SYNAPSE_PORT)
+adb reverse tcp:8180 tcp:8180   # lk-jwt-service
+adb reverse tcp:7880 tcp:7880   # LiveKit signalling
+adb reverse tcp:7881 tcp:7881   # LiveKit TCP media
+adb reverse tcp:3478 tcp:3478   # coturn
+```
+
+`adb reverse` cannot forward UDP. LiveKit's UDP candidates carry its Docker bridge IP, which the
+emulator's NAT reaches through the host anyway, and the TCP 7881 fallback covers the rest.
 
 ### Production (reaching phones on other networks)
 
 | `deploy/.env` | Value | Why |
 |---|---|---|
-| `LIVEKIT_SERVICE_URL`, `LIVEKIT_WS_URL` | leave blank | default to `https://PUBLIC_DOMAIN/livekit/jwt` and `wss://PUBLIC_DOMAIN/livekit/sfu`, both through Caddy |
-| `LIVEKIT_MEDIA_BIND_ADDR` | `0.0.0.0` | media ports must be reachable directly, not only on 127.0.0.1 |
-| `LIVEKIT_NODE_IP` | the server's public (or LAN) IP | otherwise LiveKit advertises its Docker bridge IP, which only the server itself can reach |
+| `PUBLIC_BASE_URL` | `https://...` | makes setup.sh hand out the Caddy URLs (`--profile prod` must be up) |
+| `LIVEKIT_SERVICE_URL`, `LIVEKIT_WS_URL` | leave blank | derived, see the table above |
+| `LIVEKIT_MEDIA_BIND_ADDR` | `0.0.0.0` | media ports must be reachable directly |
+| `LIVEKIT_NODE_IP` | the server's public (or LAN) IP | otherwise LiveKit advertises its Docker bridge IP |
 | firewall | open `LIVEKIT_RTC_TCP_PORT`/tcp and `LIVEKIT_RTC_UDP_MIN-MAX`/udp | call media |
 
-**Not proven:** all round-2 participants ran on the server machine itself, so the node IP and
-firewall path to a phone on another network is untested. The first real-domain deployment must
-run a two-phone call before announcing calls to staff.
-
-### Dev stack (`SERVER_NAME=localhost`)
-
-`setup.sh` still works: it advertises `https://localhost/livekit/jwt` and warns that this is
-reachable from this machine only. Calls on the dev stack additionally need `prod` up
-(`CADDY_TLS_MODE=internal`) and still hit the "localhost" gotcha below, so use a separate
-`SERVER_NAME=rumi.calls.test` stack for a real call test (the round-2 recipe, see "Verifying").
-The live dev stack predates this change: its homeserver.yaml was hand-edited to
-`http://lk-jwt-service:8080` and has no power-level override or delayed events. Re-run
-`scripts/setup.sh` on it (restarts Synapse, Element, coturn) to pick them up.
-
-
-## Local testing gotcha: SERVER_NAME must NOT be the literal string "localhost"
-
-This is the one real surprise found building this out. lk-jwt-service verifies a client's OpenID
-token by resolving the homeserver's federation base URL via HTTPS `.well-known/matrix/server`
-delegation -- **from inside its own container.** For a real domain this is a non-issue (the
-domain resolves to the same reachable address everywhere). For local testing with
-`SERVER_NAME=localhost` it breaks: glibc resolves the literal hostname `localhost` via
-`/etc/hosts` *before* any DNS/network alias lookup is even attempted, so inside the
-`lk-jwt-service` container "localhost" always means itself, never the `caddy` container --
-regardless of any Docker network alias (`docker-compose.yml`'s `caddy` service now sets one for
-`PUBLIC_DOMAIN`, which is a real, useful fix for any *other* hostname, but is a verified no-op for
-this one specific literal value). Verified live: `docker run --rm --add-host=localhost:<ip> alpine
-cat /etc/hosts` shows both entries present, but the original `127.0.0.1` one wins because it's
-first in the file.
-
-**Practical effect:** on this repo's existing default dev stack (`SERVER_NAME=localhost`), LiveKit
-and lk-jwt-service start and pass their own liveness checks, and `.well-known` correctly
-advertises `rtc_foci` once `prod`/`tls` is up -- but the actual OpenID handshake that authorizes a
-call will fail, because lk-jwt-service can't reach Caddy at "localhost" from inside its own
-container. **To actually prove a call end-to-end locally, use a real-looking hostname instead**
-(e.g. `SERVER_NAME=rumi.calls.test`), which:
-- resolves to `127.0.0.1` on the test machine via Chromium's `--host-resolver-rules` flag (no
-  `/etc/hosts` edit, no root needed) for the browser side, and
-- resolves inside the Docker network via the `caddy` service's network alias (now added) for the
-  container side.
-
-A real production deployment never hits this at all -- a real domain is not literally the string
-"localhost" in the first place. This is a local-testing-only wrinkle, documented honestly rather
-than worked around with something fragile.
+A plain-http stack whose `SERVER_NAME` is not `localhost` (for example a LAN IP) is **not
+covered**: lk-jwt-service's OpenID check would look for HTTPS on that name. Use the `prod` profile
+with a real hostname for anything beyond one machine.
 
 ## Known gaps (stated plainly)
 
-1. **Cross-network media untested.** See "Production" above: `LIVEKIT_NODE_IP` and the firewall
-   path are wired up but no participant has joined from a second machine or a phone yet.
-2. **Element X (Android) not re-tested after the fix.** The server now advertises the public URL
-   (calls-check check 7), but the phone run that saw OPEN_ID_ERROR has not been repeated.
-3. **UDP media range is small (100 ports by default).** Enough for a staff meeting on one small
-   deployment; raise `LIVEKIT_RTC_UDP_MIN`/`MAX` for more concurrent participants.
-4. **Pre-existing rooms** keep `call.member` at 50 until an admin lowers it (above).
-5. **Headless screen share uses Chromium's fake capture source**, so the shared "screen" is a
-   green test pattern with its own clock, not a real desktop. The SFU logged it as
-   `source: SCREEN_SHARE` 1920x1080 and the other two participants rendered it in the spotlight
-   (evidence below). A real desktop share is the same LiveKit publish path; a manual check with a
-   real screen is still worth doing once.
-6. **One transient reconnect** is logged per join (`livekitRoom.connect FAILED ... Client initiated
-   disconnect`, then `connected to Livekit Server` within a second): Element Call switches from its
-   initial transport to the room's active one. Harmless, not a failure.
-
+1. **Real phones and cross-network media untested.** Proven: Android emulator <-> web app on one
+   machine. `LIVEKIT_NODE_IP` and the firewall path to a phone on another network are wired up but
+   no call has crossed two networks yet. Run a two-phone call before announcing calls to staff.
+2. **Group calls not re-run on the default stack or from the phone.** The 3-person proof below
+   was on the separate `rumi.calls.test` HTTPS stack, from the web app.
+3. **First video call asks for the camera** (Android permission prompt). Until the teacher taps
+   "While using the app", the phone joins without video; if the app is backgrounded at that
+   moment the call screen can close while the call keeps running (seen 2026-09-24, see below).
+4. **UDP media range is small (100 ports).** Raise `LIVEKIT_RTC_UDP_MIN`/`MAX` for more
+   concurrent participants.
+5. **Pre-existing rooms** keep `call.member` at 50 until an admin lowers it (above).
+6. **Headless screen share** used Chromium's fake capture source, not a real desktop.
 
 ## Capacity story (issue #2 asked for this explicitly)
 
@@ -184,15 +197,32 @@ scripts/calls-check.sh
 CALLS_CHECK_RESOLVE=rumi.calls.test:443:127.0.0.1 scripts/calls-check.sh
 ```
 
-11 checks, each FAILs rather than skips: livekit + lk-jwt-service running, SFU and `/healthz`
-answer, Element `feature_group_calls`, `.well-known` advertises `rtc_foci`, **Synapse
-`/rtc/transports` URL is public, `.well-known` URL is public, lk-jwt-service's client wss:// URL
-is public** (no `lk-jwt-service`/`livekit`/`synapse`/`caddy`/`element` hostnames), new rooms put
-`call.member` at 0, and Synapse advertises delayed events (`org.matrix.msc4140`). Falsified live:
-against the dev stack (hand-edited `http://lk-jwt-service:8080`, calls profile down) it reports
-1 passed, 10 failed, naming the internal URL.
+12 checks, each FAILs rather than skips: livekit, lk-jwt-service and calls-proxy running; SFU and
+`/healthz` answer; Element `feature_group_calls`; Synapse `/rtc/transports` URL is not a
+Docker-internal name; **that advertised URL answers; a real OpenID token gets a LiveKit JWT from
+it**; the ws(s):// URL it hands back is public; new rooms put `call.member` at 0; delayed events
+(`org.matrix.msc4140`). `scripts/e2e.sh` repeats the OpenID -> JWT check against the advertised URL
+(check "advertised call transport answers...") so a dead address fails the main suite too.
+Falsified live: on the pre-fix dev stack calls-check reported 4 passed / 8 failed and e2e 16/1.
 
-### Round-2 call proof (2026-09-23)
+### Phone <-> web proof on the default stack (2026-09-24)
+
+Default dev stack (`SERVER_NAME=localhost`, no Caddy) after one `scripts/setup.sh` run. Android
+emulator (API 34), release app `ai.hellorumi.messenger` as Teacher Zara, `adb reverse` as above;
+web app `http://127.0.0.1:8182` as Teacher Hamza in headless Chromium (fake camera/mic). Evidence in
+the personal-agent-v2 vault, `projects/rumi-messenger/evidence-2026-09-24/calls-fix/`.
+
+| Item | Result |
+|---|---|
+| Phone taps voice call -> web rings | PROVEN: "Incoming voice call, Teacher Zara Khan, Decline / Join" (`w04`) |
+| Both sides in the call, timer | PROVEN: web "Call in progress (0:35)" + Zara's tile (`w05`); phone call screen with Hamza, then "Call in progress" row (`p03`, `p05`); LiveKit: both participants active, both published audio |
+| Clean hang-up + history | PROVEN: web ends, phone call closes; "Call started 6:52" (phone) / "Voice call" (web) (`p06`, `w07`, `w17`) |
+| Video, both directions | PROVEN on the second attempt: phone shows Hamza's camera + own preview (`p15`), web shows Zara's camera (`w15`); LiveKit: CAMERA + MICROPHONE tracks from both |
+| Video timer on the phone | PROVEN: "Call in progress (1:14)" (`p10`, during the first, interrupted attempt; in the second the PiP window covers it) |
+| First video attempt | Interrupted: another agent switched the shared emulator to a different app while the camera prompt was open; the call kept running without the phone's video and was ended from the web |
+| Any OPEN_ID_ERROR / "Failed to authenticate to transport" | none (phone logcat, web console); lk-jwt-service issued 23 LiveKit tokens in the window (calls plus the e2e/calls-check runs) |
+
+### Round-2 group-call proof (2026-09-23, separate HTTPS stack)
 
 Isolated stack (`COMPOSE_PROJECT_NAME=rumicallsverify`, `SERVER_NAME=rumi.calls.test`, own ports,
 coturn not started so the dev stack's coturn is untouched), `calls` + `prod` with
