@@ -149,8 +149,8 @@ quizzes are the parts we've tested in this app so far.
 ## 6. Chat and call your colleagues
 
 **Start a chat.** Tap **+** (Android) or **Start chat** (web). Then, under **Search for someone**, type the first letters of a
-colleague's name, for example `Ay` for Ayesha Khan. Pick them from the list, then tap **Send
-invite** on the "Send invite?" box that appears; the chat opens after that. The search matches
+colleague's name, for example `Ay` for Ayesha Khan. Pick them from the list, then confirm on the
+"Start a chat with this new contact?" box that appears; the chat opens after that. The search matches
 the start of each word in a name, so `Kha` finds "Ayesha Khan" but `yesha` doesn't.
 
 **Make a group.** Tap **+** and choose **New room**. Give it a name, such as "Grade 4 teachers",
