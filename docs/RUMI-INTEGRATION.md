@@ -170,3 +170,9 @@ Copied from rumi-platform's `.env.template` `MATRIX_*` block:
    picker) render as a numbered list they reply to by number or name, since Matrix has no native
    button/list widget most clients render consistently -- the same degraded-but-working pattern
    Baileys already uses for WhatsApp's own linked-device mode.
+5. In a group room (more than two members, or a named room that isn't one of Rumi's DMs), Rumi
+   answers only when addressed. That means a message that mentions it (a pill, `@Rumi`, or its
+   name), a reply to one of its messages, or a numbered answer to the menu it last sent that
+   teacher in that room. Anything else gets no reply, reaction or typing indicator, and the
+   mention is removed before Rumi reads the text. DMs are unchanged. Implemented in
+   rumi-platform `bot/shared/services/messaging/inbound/matrix-events.adapter.js#gateGroupMessage`.

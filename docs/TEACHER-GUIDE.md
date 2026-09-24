@@ -156,6 +156,12 @@ the start of each word in a name, so `Kha` finds "Ayesha Khan" but `yesha` doesn
 **Make a group.** Tap **+** and choose **New room**. Give it a name, such as "Grade 4 teachers",
 and add colleagues by name.
 
+**Rumi in a group.** Rumi isn't in a group until someone adds it. Invite **Rumi** by name, the
+same way you add a colleague. After that, start your message with **@Rumi** (pick Rumi from the
+list that appears) to ask something, for example "@Rumi one warm-up for grade 3 maths". You can
+also reply to one of Rumi's messages. If Rumi sends a numbered list, just reply with the number.
+Rumi doesn't respond to anything else, so the group stays a conversation between teachers.
+
 **Send photos, files and voice notes.** In any chat, tap **+** for photos and files. Hold the
 microphone to record a voice note.
 
