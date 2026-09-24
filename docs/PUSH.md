@@ -6,7 +6,7 @@ Two push paths exist. **The no-Google one (UnifiedPush + our own ntfy) is the on
 
 | Path | Who runs the server | Keys needed | State |
 |---|---|---|---|
-| **UnifiedPush + self-hosted ntfy** | us (`ntfy` service, `push` profile; started by `setup.sh` in LAN mode) | none | **Whole chain proven on the emulator** (app in background, app force-stopped, incoming call rings) with LAN mode, see "LAN mode" below. One hop still needs an app fix on a raw-IP LAN server: the app refuses plain http to an IP when it looks up the gateway. |
+| **UnifiedPush + self-hosted ntfy** | us (`ntfy` service, `push` profile; started by `setup.sh` in LAN mode) | none | **Whole chain proven on the emulator** (app in background, app force-stopped, incoming call rings) with LAN mode, see "LAN mode" below. Since app v0.1.4 this works on a raw-IP LAN server with no hand-setting (the app derives the gateway from the ntfy address). Calls from the phone on a LAN still need HTTPS. |
 | Firebase (FCM) via Sygnal | us (`sygnal` service, `push` profile) | Firebase service account + `google-services.json` + signed build | Gateway built, no keys. Unchanged, see "Sygnal" below. |
 
 **Before this change** the F-Droid/no-Google build showed "No distributors available" on every
@@ -28,7 +28,11 @@ How Element X's own F-Droid users get push, and exactly what the fork's code doe
    Synapse pusher with `url = <NTFY_BASE_URL>/_matrix/push/v1/notify` and
    `pushkey = <endpoint>`. Anything else there (404, 401, ...) makes the app silently fall back to
    Element's public gateway, which is why ntfy needs its **own hostname**, not a `/ntfy` path:
-   on `PUBLIC_DOMAIN`, `/_matrix/*` is Synapse's.
+   on `PUBLIC_DOMAIN`, `/_matrix/*` is Synapse's. If the lookup can't run at all (network
+   error, or the app's cleartext policy refusing `http://<raw IP>`), the fork (v0.1.4+) uses
+   `<endpoint origin>/_matrix/push/v1/notify` anyway for an `http://` endpoint; `https://`
+   endpoints keep upstream's fallback (previous gateway, else the public one). The phone never
+   connects to that URL itself: Synapse does.
 4. On a new message Synapse POSTs to ntfy's gateway, ntfy publishes to the topic, the ntfy app
    hands it to Rumi Messenger, which wakes (even force-stopped: the UnifiedPush connector binds a
    `RaiseToForegroundService`), fetches the event from Synapse and shows the notification.
@@ -98,7 +102,7 @@ could use them:
 
 | Client | What happened with `http://192.168.100.188:*` |
 |---|---|
-| Android app, gateway lookup | `java.net.UnknownServiceException: CLEARTEXT communication to 192.168.100.188 not permitted by network security policy` (the fork's `network_security_config.xml` allows plain http only to localhost, 127.0.0.1, 10.0.2.2 and names ending `.lan`, `.local`, `.home.arpa`, `.home`, `.test`, `.localdomain`). The app then fell back to `https://matrix.gateway.unifiedpush.org`, which can't reach a LAN. |
+| Android app, gateway lookup | `java.net.UnknownServiceException: CLEARTEXT communication to 192.168.100.188 not permitted by network security policy` (the fork's `network_security_config.xml` allows plain http only to localhost, 127.0.0.1, 10.0.2.2 and names ending `.lan`, `.local`, `.home.arpa`, `.home`, `.test`, `.localdomain`). Up to v0.1.3 the app then fell back to `https://matrix.gateway.unifiedpush.org`, which can't reach a LAN. **Fixed in v0.1.4:** the lookup still fails (policy unchanged), and the app registers `http://<LAN_IP>:2586/_matrix/push/v1/notify`. |
 | Android app, calls | Element Call runs from `https://appassets.androidplatform.net`: `Mixed Content ... requested an insecure resource 'http://192.168.100.188:8180/sfu/get'. This request has been blocked`. Only `http://localhost` is exempt. |
 | Web app from another computer | `window.isSecureContext=false`, no `crypto.subtle`: "Rumi does not support this browser". |
 
@@ -135,15 +139,32 @@ The first call attempt, while call URLs still pointed at the LAN IP, rang but fa
 with the mixed-content error above; the app had also cached that transport until it was
 restarted.
 
+#### Emulator proof of the app fix, 2026-09-24 (`ai.hellorumi.messenger.debug`, fork `f69ce4424c`, released as v0.1.4-rumi)
+
+Teacher Sana, ntfy app Default server `http://192.168.100.188:2586`, **nothing hand-set**. Her
+pusher before: `https://ntfy.sh/up...` / `https://ntfy.sh/_matrix/push/v1/notify` (registered
+before the Default server changed). Settings -> Notifications -> "Enable notifications on this
+device" off, then on: ntfy handed out `http://192.168.100.188:2586/upHOIdvdCHZKeN?up=1`, the app
+logged `CLEARTEXT communication to 192.168.100.188 not permitted` for the lookup (policy
+unchanged), and Synapse's pusher became `url = http://192.168.100.188:2586/_matrix/push/v1/notify`.
+Evidence: personal-agent vault `evidence-2026-09-24/push-fork/`.
+
+| Step | Result |
+|---|---|
+| (a) app in background, Hamza (web) sends a DM | `Received response to POST http://192.168.100.188:2586/_matrix/push/v1/notify: 200`, decrypted notification in the shade (`05`, `06`) |
+| (b) `am force-stop` (no process, notifications cleared), second DM | same 200; app woken by the push (`New message`, `handling pushData`), notification (`07`, `08`, `09`) |
+| (c) app force-stopped, Hamza voice-calls from web | same 200; heads-up "Teacher Hamza, Incoming call, Decline / Answer", still ringing ~40 s later (`10`, `11`) |
+
 #### What a real phone on a school LAN still needs
 
 1. **A name, not an IP.** A router DNS entry such as `rumi.lan` -> the server, and
    `PUBLIC_BASE_URL=http://rumi.lan:8108`. The app already allows plain http to `*.lan`, so sign-in
    and the gateway lookup work with no app change and `NTFY_BASE_URL` follows it
    (`http://rumi.lan:2586`). Not tested: needs a router with local DNS.
-2. **Or an app fix** so a raw IP works: when the lookup fails, use the endpoint's own
-   `/_matrix/push/v1/notify` instead of the public gateway (`UnifiedPushGatewayUrlResolver.kt`),
-   plus a cleartext rule for private ranges.
+2. **Nothing more for notifications and ringing on a raw IP** (fixed in v0.1.4, above). Only
+   the push hop is proven: signing in with `http://<raw IP>:8108` as the homeserver address is
+   untested (our phones use `127.0.0.1` via adb reverse), so a `*.lan` name (1.) is still the
+   safe choice for the address teachers type.
 3. **HTTPS for calls from the phone** (and for the web app on other computers), in any case:
    Element Call inside the app refuses every plain-http address except localhost. Caddy `tls
    internal` with its root certificate installed on the phones (the fork trusts user CAs) is the
