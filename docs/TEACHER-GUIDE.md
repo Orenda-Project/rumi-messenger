@@ -188,13 +188,16 @@ once, when your admin gives you the ntfy address:
 1. Install **ntfy** (from F-Droid, or the link your admin sends). Allow its notifications, and tap
    **Allow** when it asks to run in the background.
 2. In ntfy, tap the menu (three dots), then **Settings**, then **Default server**. Type the
-   address your admin gave you (it starts `https://ntfy.`) and tap **Save**. Do this *before*
+   address your admin gave you (it starts `https://ntfy.`, or `http://` on a school-network
+   server) and tap **Save**. Do this *before*
    opening Rumi.
 3. Open Rumi. The "No distributors available" box no longer appears.
 
-> **Coming: notifications when the app is closed.** Your admin is still finishing this on the
-> server ([#3](https://github.com/Orenda-Project/rumi-messenger/issues/3)). Until they say it's
-> on, open the app a few times a day, or keep the web app open in a browser tab.
+> **Coming: notifications when the app is closed.** This now works on our test phone: a message
+> shows up within seconds with Rumi in the background or fully closed, and a call from the web
+> rings the phone. It has not been tried on a real phone at a school yet
+> ([#3](https://github.com/Orenda-Project/rumi-messenger/issues/3)). Until your admin says it's on,
+> open the app a few times a day, or keep the web app open in a browser tab.
 
 ## 7. Save your backup code (do this on day one)
 

@@ -270,13 +270,41 @@ serves it at `https://ntfy.<your domain>`), then `scripts/push-check.sh` (4 chec
 pass). Each teacher installs the ntfy app once and points it at that address before opening Rumi
 ([TEACHER-GUIDE](TEACHER-GUIDE.md#6-chat-and-call-your-colleagues)). One thing to check: Synapse
 won't push to a private IP, so `docker exec rumi-synapse getent hosts ntfy.<your domain>` must give
-the public IP. On a LAN-only server you need `ip_range_whitelist` in `homeserver.yaml`
-([PUSH.md](PUSH.md#the-one-synapse-catch-pushers-cant-reach-private-ips)).
+the public IP. A server with no domain uses LAN mode, below.
 
-> **Coming:** the phone side is proven on the emulator with the app fully stopped; the last hop
-> (Synapse to ntfy on a real public hostname) hasn't been seen working on a live server yet
-> ([#3](https://github.com/Orenda-Project/rumi-messenger/issues/3)). The Firebase route (Sygnal)
-> is built but has no key.
+> **Coming:** the whole chain (message in the background, app force-stopped, incoming call
+> ringing) is proven on the emulator with LAN mode, but with one app step stood in for; no real
+> phone has run it yet ([#3](https://github.com/Orenda-Project/rumi-messenger/issues/3),
+> [PUSH.md](PUSH.md#lan-mode-school-server-on-the-school-wi-fi-no-domain)). The Firebase route
+> (Sygnal) is built but has no key.
+
+### School LAN server, no domain
+
+For a box in the school (teachers on the school Wi-Fi, no public domain):
+
+1. Give the box a **fixed IP** (a DHCP reservation on the router). Phones store push addresses
+   that contain it.
+2. `LAN_IP` in `deploy/.env`: leave it blank and `setup.sh` picks the box's first IP
+   (`hostname -I | awk '{print $1}'`) while `PUBLIC_DOMAIN` is `localhost`. Set it by hand if that
+   picks the wrong network card. `LAN_IP=off` turns LAN mode off (then also set
+   `BIND_ADDR=127.0.0.1`).
+3. Run `scripts/setup.sh`. It starts ntfy on `http://<LAN_IP>:2586`, lets Synapse push to that one
+   address (`ip_range_whitelist: ["<LAN_IP>/32"]`, nothing wider, so no teacher can make the
+   server call other machines on the school network), and binds the services on every interface.
+   `scripts/e2e.sh` then checks a real push reaches ntfy.
+4. Open these ports **on the box's firewall, to the school network only**: TCP 8108 (server), 8182
+   (web app), 2586 (ntfy), 8180 and 7880 (calls), TCP 7881 + UDP 50100-50200 (call media), TCP+UDP
+   3478 (web app 1:1 calls). Never forward them on the router to the internet.
+5. Phones and computers must be **on the same network** as the box. From home, nothing works.
+
+What does not work yet over plain http on a LAN, stated plainly:
+
+- **The phone app refuses plain http to a bare IP.** Signing in to `http://192.168.x.y:8108`
+  and the push setup both fail. A router DNS name ending `.lan` (e.g. `rumi.lan`, set
+  `PUBLIC_BASE_URL=http://rumi.lan:8108`) is allowed by the app; not tested yet.
+- **Calls from the phone app need HTTPS** (the in-app call screen blocks every plain-http address
+  but localhost). So does the **web app on other computers** (it says "Rumi does not support this
+  browser"). For those, use a real domain ([section 4](#4-go-live-on-a-real-domain)).
 
 ## 8. Calls
 

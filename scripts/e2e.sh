@@ -335,6 +335,24 @@ if [[ "${REGISTER_OK}" == "1" ]]; then
   check "user A auto-joined #rumi-announcements" "${AUTO_JOIN_OK}" "room_id='${ANNOUNCE_ROOM_ID}'"
 
   # -------------------------------------------------------------------------
+  # 4b. LAN-mode push (issue #3): B registers a UnifiedPush pusher on our ntfy exactly as the
+  #     phone app does (url = <NTFY_BASE_URL>/_matrix/push/v1/notify, pushkey = <NTFY_BASE_URL>/up...)
+  #     and a live subscriber listens on that topic. A's DM in check 5 must then arrive at the
+  #     subscriber, i.e. Synapse -> ntfy -> subscriber really happened. Falsifiable: without
+  #     ip_range_whitelist Synapse logs "403: IP address blocked" and nothing arrives.
+  #     Not in LAN mode (LAN_IP empty/off) -> PASS with nothing checked, like CALLS=off below.
+  # -------------------------------------------------------------------------
+  PUSH_SUB_FILE=""
+  if [[ -n "${LAN_IP:-}" && "${LAN_IP}" != "off" && -n "${NTFY_BASE_URL:-}" ]]; then
+    PUSH_TOPIC="upe2${EPOCH}"   # ntfy treats only "up" + exactly 12 chars as a UnifiedPush topic
+    PUSH_SUB_FILE="$(mktemp)"
+    curl -sN --max-time 20 "${NTFY_BASE_URL}/${PUSH_TOPIC}/json" > "${PUSH_SUB_FILE}" 2>/dev/null &
+    PUSH_SUB_PID=$!
+    sleep 1
+    mxc_call POST "${TOKEN_B}" "/_matrix/client/v3/pushers/set" "{\"kind\":\"http\",\"app_id\":\"ai.hellorumi.e2e\",\"pushkey\":\"${NTFY_BASE_URL}/${PUSH_TOPIC}?up=1\",\"app_display_name\":\"e2e\",\"device_display_name\":\"e2e\",\"lang\":\"en\",\"data\":{\"url\":\"${NTFY_BASE_URL}/_matrix/push/v1/notify\",\"format\":\"event_id_only\"}}" >/dev/null
+  fi
+
+  # -------------------------------------------------------------------------
   # 5. A creates a DM with B, sends text, B reads it back
   # -------------------------------------------------------------------------
   CREATE_DM_RESP="$(mxc_call POST "${TOKEN_A}" "/_matrix/client/v3/createRoom" "{\"is_direct\":true,\"invite\":[\"@${USER_B}:${SERVER_NAME}\"],\"preset\":\"trusted_private_chat\"}")"
@@ -352,6 +370,20 @@ if [[ "${REGISTER_OK}" == "1" ]]; then
     check "A -> B DM roundtrip (send + readback)" "${DM_OK}" "room='${DM_ROOM_ID}'"
   else
     check "A -> B DM roundtrip (send + readback)" 0 "createRoom failed: error='$(json_field "${CREATE_DM_RESP}" error)'"
+  fi
+
+  if [[ -z "${PUSH_SUB_FILE}" ]]; then
+    check "LAN mode: Synapse pushes to ntfy (not in LAN mode, nothing to check)" 1
+  else
+    PUSH_OK=0
+    for _i in $(seq 1 15); do
+      grep -q '"event":"message"' "${PUSH_SUB_FILE}" && { PUSH_OK=1; break; }
+      sleep 1
+    done
+    kill "${PUSH_SUB_PID}" 2>/dev/null
+    PUSH_DETAIL="nothing reached ${NTFY_BASE_URL}/${PUSH_TOPIC} in 15s; synapse log: $(docker logs --since 60s "${RUMI_CONTAINER_PREFIX}-synapse" 2>&1 | grep -o "${PUSH_TOPIC}[^\"]*" | tail -1)"
+    check "LAN mode: Synapse pushed A's DM to B's pusher on ntfy and a subscriber got it (${NTFY_BASE_URL})" "${PUSH_OK}" "${PUSH_DETAIL}"
+    rm -f "${PUSH_SUB_FILE}"
   fi
 
   # -------------------------------------------------------------------------
@@ -549,6 +581,7 @@ print(json.dumps({'room':'!e2e-call:'+sys.argv[2],'device_id':'E2E','openid_toke
 else
   check "user A auto-joined #rumi-announcements" 0 "skipped: user registration failed"
   check "A -> B DM roundtrip (send + readback)" 0 "skipped: user registration failed"
+  check "LAN mode: Synapse pushes to ntfy" 0 "skipped: user registration failed"
   check "A -> @rumi DM message lands in room" 0 "skipped: user registration failed"
   check "GET /_matrix/client/v3/voip/turnServer returns TURN credentials (Synapse-side config only -- does NOT prove coturn is up, see next check)" 0 "skipped: user registration failed"
   check "coturn is alive and honors the Synapse-issued TURN credentials (docker exec turnutils_uclient ALLOCATE)" 0 "skipped: user registration failed"

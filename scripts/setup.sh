@@ -41,7 +41,7 @@ fill_env_var() {
 # `SYNAPSE_PORT=8208 ELEMENT_PORT=8283 scripts/setup.sh`). These must win over both a freshly
 # copied .env.example AND an existing deploy/.env -- otherwise `source`-ing the file below would
 # silently clobber the caller's exported values back to whatever the file says.
-OVERRIDE_VARS=(SERVER_NAME PUBLIC_BASE_URL SYNAPSE_PORT ELEMENT_PORT BIND_ADDR REGISTRATION_MODE COMPOSE_PROJECT_NAME RUMI_CONTAINER_PREFIX TURN_PORT TURN_MIN_PORT TURN_MAX_PORT PUBLIC_DOMAIN ELEMENT_DOMAIN CADDY_TLS_MODE BACKUP_KEEP_N LIVEKIT_PORT LIVEKIT_RTC_TCP_PORT LIVEKIT_RTC_UDP_MIN LIVEKIT_RTC_UDP_MAX LIVEKIT_JWT_PORT LIVEKIT_SERVICE_URL LIVEKIT_WS_URL LIVEKIT_NODE_IP CALLS)
+OVERRIDE_VARS=(LAN_IP SERVER_NAME PUBLIC_BASE_URL SYNAPSE_PORT ELEMENT_PORT BIND_ADDR REGISTRATION_MODE COMPOSE_PROJECT_NAME RUMI_CONTAINER_PREFIX TURN_PORT TURN_MIN_PORT TURN_MAX_PORT PUBLIC_DOMAIN ELEMENT_DOMAIN CADDY_TLS_MODE BACKUP_KEEP_N LIVEKIT_PORT LIVEKIT_RTC_TCP_PORT LIVEKIT_RTC_UDP_MIN LIVEKIT_RTC_UDP_MAX LIVEKIT_JWT_PORT LIVEKIT_SERVICE_URL LIVEKIT_WS_URL LIVEKIT_NODE_IP CALLS)
 for _v in "${OVERRIDE_VARS[@]}"; do
   eval "PRESET_${_v}=\"\${${_v}:-}\""
 done
@@ -149,6 +149,32 @@ PUBLIC_DOMAIN="${PUBLIC_DOMAIN:-${SERVER_NAME}}"
 ELEMENT_DOMAIN="${ELEMENT_DOMAIN:-${PUBLIC_DOMAIN}}"
 CADDY_TLS_MODE="${CADDY_TLS_MODE:-}"
 BACKUP_KEEP_N="${BACKUP_KEEP_N:-14}"
+# LAN mode (issue #3): a school server on the school Wi-Fi with no public domain. Empty +
+# PUBLIC_DOMAIN=localhost -> auto-detect the box's first IP; LAN_IP=off -> pure localhost dev stack.
+# When set: services bind 0.0.0.0 (loopback still works), ntfy publishes on http://<host>:NTFY_PORT
+# and Synapse may push to exactly LAN_IP/32 (it refuses private IPs otherwise). <host> is
+# PUBLIC_BASE_URL's host (e.g. a router DNS name like rumi.lan), or LAN_IP when that is localhost.
+# Client URLs (PUBLIC_BASE_URL, call URLs) are NOT rewritten to the raw IP: the phone app refuses
+# plain http to an IP and in-app calls refuse any non-localhost http (docs/PUSH.md, LAN mode).
+LAN_IP="${LAN_IP:-}"
+if [[ -z "${LAN_IP}" && "${PUBLIC_DOMAIN}" == "localhost" ]]; then
+  LAN_IP="$(hostname -I 2>/dev/null | awk '{print $1}')"
+fi
+fill_env_var LAN_IP "${LAN_IP}"
+[[ "${LAN_IP}" == "off" ]] && LAN_IP=""
+if [[ -n "${LAN_IP}" ]]; then
+  log "  LAN mode: LAN_IP=${LAN_IP} (LAN_IP=off in deploy/.env to turn it off)"
+  [[ "${BIND_ADDR}" == "127.0.0.1" ]] && BIND_ADDR=0.0.0.0 && fill_env_var BIND_ADDR "${BIND_ADDR}"
+  NTFY_HOST="$(python3 -c "import sys,urllib.parse; print(urllib.parse.urlsplit(sys.argv[1]).hostname or '')" "${PUBLIC_BASE_URL}")"
+  case "${NTFY_HOST}" in ""|localhost|127.0.0.1) NTFY_HOST="${LAN_IP}" ;; esac
+  case "${NTFY_BASE_URL:-}" in
+    ""|http://*)   # plain-http ntfy belongs to LAN mode; an https:// one (Caddy) is left alone
+      NTFY_BASE_URL="http://${NTFY_HOST}:${NTFY_PORT:-2586}"; fill_env_var NTFY_BASE_URL "${NTFY_BASE_URL}"
+      fill_env_var NTFY_BEHIND_PROXY false ;;
+  esac
+  LIVEKIT_NODE_IP="${LIVEKIT_NODE_IP:-${LAN_IP}}"
+  export BIND_ADDR NTFY_BASE_URL NTFY_BEHIND_PROXY=false
+fi
 # The host clients reach this server at (e.g. "localhost", or "chat.yourschool.org"): the hostname
 # half of PUBLIC_BASE_URL. Used for the TURN URIs (step 3) and the call URLs just below.
 CLIENT_HOST="$(python3 -c "
@@ -215,6 +241,8 @@ dc run --rm \
   -e TURN_SHARED_SECRET="${TURN_SHARED_SECRET}" \
   -e LIVEKIT_SERVICE_URL="${LIVEKIT_SERVICE_URL}" \
   -e CALLS="${CALLS}" \
+  -e LAN_IP="${LAN_IP}" \
+  -e PUBLIC_BASE_URL="${PUBLIC_BASE_URL}" \
   --entrypoint python3 synapse - <<'PYEOF'
 import os, yaml
 
@@ -371,6 +399,20 @@ config["default_power_level_content_override"] = {
     preset: {"events": dict(_room_events)}
     for preset in ("private_chat", "trusted_private_chat", "public_chat")
 }
+
+# The URL Synapse tells clients about itself (emails, SSO redirects, well-known) -- the same one
+# Element and the bot are given.
+config["public_baseurl"] = os.environ["PUBLIC_BASE_URL"].rstrip("/") + "/"
+
+# LAN mode (issue #3, docs/PUSH.md): Synapse sends pusher traffic through an IP-blocklisted client
+# that refuses every private address, so pushes to ntfy on the school LAN failed with
+# "403: IP address blocked". Exempt exactly the server's own LAN IP (/32) -- ntfy is published
+# there -- and nothing else: widening this (a whole /24, 10/8) would let any teacher register a
+# pusher that makes Synapse POST into other machines on the school network (SSRF).
+if os.environ.get("LAN_IP"):
+    config["ip_range_whitelist"] = [os.environ["LAN_IP"] + "/32"]
+else:
+    config.pop("ip_range_whitelist", None)
 
 with open(path, "w") as f:
     yaml.safe_dump(config, f, default_flow_style=False, sort_keys=False)
@@ -594,6 +636,12 @@ dc restart synapse
 # start. A prior run of this exact script hit precisely that: coturn kept running for 2+ minutes
 # on a config it couldn't even read, discovered live while writing this script.
 dc up -d --force-recreate coturn
+# LAN mode: phone push is the point of it, and ntfy needs no keys -- start (or re-point) it here.
+# Plain `up -d` recreates it only when NTFY_BASE_URL/BIND_ADDR actually changed.
+if [[ -n "${LAN_IP}" ]]; then
+  log "  LAN mode: starting ntfy on ${NTFY_BASE_URL}"
+  dc --profile push up -d --wait ntfy
+fi
 # Calls (issues #1 + #2): on by default. --force-recreate for the same stale-config reason as
 # coturn (livekit.yaml was just re-rendered, and the call URLs above may have changed).
 if [[ "${CALLS}" != "off" ]]; then
@@ -953,6 +1001,9 @@ else
   echo " Calls:         off (CALLS=off) -- the phone app cannot call; web offers legacy 1:1 only"
 fi
 echo " Server name:   ${SERVER_NAME}"
+if [[ -n "${LAN_IP}" ]]; then
+  echo " LAN mode:      ntfy (push) ${NTFY_BASE_URL}, Synapse may push to ${LAN_IP}/32 only (docs/ADMIN-GUIDE.md)"
+fi
 echo
 echo " Admin account:   ${ADMIN_USER}"
 if [[ -n "${GENERATED_ADMIN_PASSWORD}" ]]; then

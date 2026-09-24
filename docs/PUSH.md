@@ -6,7 +6,7 @@ Two push paths exist. **The no-Google one (UnifiedPush + our own ntfy) is the on
 
 | Path | Who runs the server | Keys needed | State |
 |---|---|---|---|
-| **UnifiedPush + self-hosted ntfy** | us (`ntfy` service, `push` profile) | none | Phone half **proven** on the emulator with the app force-stopped (below). Synapse-to-ntfy hop needs a non-private address for ntfy, so it is proven only on a real deployment (see "The one Synapse catch"). |
+| **UnifiedPush + self-hosted ntfy** | us (`ntfy` service, `push` profile; started by `setup.sh` in LAN mode) | none | **Whole chain proven on the emulator** (app in background, app force-stopped, incoming call rings) with LAN mode, see "LAN mode" below. One hop still needs an app fix on a raw-IP LAN server: the app refuses plain http to an IP when it looks up the gateway. |
 | Firebase (FCM) via Sygnal | us (`sygnal` service, `push` profile) | Firebase service account + `google-services.json` + signed build | Gateway built, no keys. Unchanged, see "Sygnal" below. |
 
 **Before this change** the F-Droid/no-Google build showed "No distributors available" on every
@@ -61,21 +61,93 @@ How Element X's own F-Droid users get push, and exactly what the fork's code doe
 
 Synapse sends pusher traffic through its IP-blocklisted HTTP client, and with no
 `ip_range_blacklist` in `homeserver.yaml` the default list applies: 127/8, 10/8, 172.16/12,
-192.168/16 and friends. Seen live on 2026-09-24:
+192.168/16 and friends. Seen live on 2026-09-24, before LAN mode:
 
 ```
 synapse.http.client  Error sending request to  POST http://127.0.0.1:2586/_matrix/push/v1/notify: SynapseError 403: IP address blocked
-synapse.push.httppusher  Failed to push data to @+923001230095:localhost/im.vector.app.android/http://127.0.0.1:2586/upQx4NtGsI5P9w?up=1: ... 403: IP address blocked
+synapse.push.httppusher  Failed to push data to @+923001230095:localhost/im.vector.app.android/http://127.0.0.1:2586/upwH0cBBSiKcw3?up=1: ... 403: IP address blocked
 ```
+
+Two problems in that line: 127.0.0.1 is private, and 127.0.0.1 inside the Synapse container is
+Synapse itself, not the host. So ringing never worked either: Element X rings for an incoming call
+through the same push.
 
 - **Production:** `NTFY_DOMAIN` resolves (from inside the Synapse container too, it isn't a
   compose alias) to the server's public IP, which isn't blocked. No Synapse change needed. Check
   once with `docker exec rumi-synapse getent hosts ntfy.<domain>` that it gives the public IP.
-- **A LAN-only or local deployment** needs `ip_range_whitelist: ["<ntfy's IP>/32"]` in
-  `homeserver.yaml` and a Synapse restart. Not applied here: this task was not allowed to restart
-  Synapse. (Locally there's a second problem: `127.0.0.1` inside the Synapse container is Synapse
-  itself, so a local proof also needs a shared address, e.g. `NTFY_BASE_URL=http://<LAN IP>:2586`
-  with ntfy bound to that IP.)
+- **A school LAN server:** LAN mode, next section.
+
+### LAN mode (school server on the school Wi-Fi, no domain)
+
+`LAN_IP` in `deploy/.env` (blank = `setup.sh` picks `hostname -I | awk '{print $1}'` whenever
+`PUBLIC_DOMAIN` is `localhost`; `off` = pure localhost dev stack). When set, `setup.sh`:
+
+- sets `NTFY_BASE_URL=http://<host>:2586` (`<host>` = `PUBLIC_BASE_URL`'s host, or `LAN_IP` when
+  that is localhost), `NTFY_BEHIND_PROXY=false`, and starts ntfy itself;
+- binds the services on `0.0.0.0` (`BIND_ADDR`), so the LAN and loopback both reach them. ntfy
+  keeps its deny-all rule except `up*` topics;
+- writes `ip_range_whitelist: ["<LAN_IP>/32"]` to `homeserver.yaml`. **Only that one address.**
+  A teacher chooses her own pusher URL, so a wider range (the whole /24, 10/8) would let any
+  account make Synapse POST to other machines on the school network (SSRF). ntfy is published on
+  the server's own IP, so /32 is all push needs;
+- sets `LIVEKIT_NODE_IP=<LAN_IP>` and `public_baseurl` from `PUBLIC_BASE_URL`.
+
+It does **not** rewrite the client URLs (`PUBLIC_BASE_URL`, call URLs) to `http://<LAN_IP>`,
+although that was the first plan. Tried live on 2026-09-24 and rolled back, because no client
+could use them:
+
+| Client | What happened with `http://192.168.100.188:*` |
+|---|---|
+| Android app, gateway lookup | `java.net.UnknownServiceException: CLEARTEXT communication to 192.168.100.188 not permitted by network security policy` (the fork's `network_security_config.xml` allows plain http only to localhost, 127.0.0.1, 10.0.2.2 and names ending `.lan`, `.local`, `.home.arpa`, `.home`, `.test`, `.localdomain`). The app then fell back to `https://matrix.gateway.unifiedpush.org`, which can't reach a LAN. |
+| Android app, calls | Element Call runs from `https://appassets.androidplatform.net`: `Mixed Content ... requested an insecure resource 'http://192.168.100.188:8180/sfu/get'. This request has been blocked`. Only `http://localhost` is exempt. |
+| Web app from another computer | `window.isSecureContext=false`, no `crypto.subtle`: "Rumi does not support this browser". |
+
+`scripts/e2e.sh` check "LAN mode: Synapse pushed A's DM to B's pusher on ntfy and a subscriber got
+it": B registers a pusher exactly like the app does, a live subscriber listens on its `up` topic
+(ntfy only treats `up` + exactly 12 characters as a UnifiedPush topic, else 507), A's DM must
+arrive there. Falsified live: with `ip_range_whitelist` removed it FAILs with
+`403: IP address blocked` (18/19); restored, 19/19. After LAN mode, for Zara's real phone pusher:
+
+```
+synapse.http.client  Received response to POST http://192.168.100.188:2586/_matrix/push/v1/notify: 200
+```
+
+#### Emulator proof, 2026-09-24 (`emulator-5554`, API 34, `ai.hellorumi.messenger` v0.1.3)
+
+Teacher Zara signed in against `http://127.0.0.1:8108` (adb reverse); ntfy app Default server
+`http://192.168.100.188:2586` (the emulator reaches the host's LAN IP directly). Deleting the old
+`127.0.0.1` subscription in ntfy made the app re-register at once:
+`NtfyUpDistributor: Sending NEW_ENDPOINT ... http://192.168.100.188:2586/upzGG1EWxo3xQN?up=1`.
+The app's gateway lookup then hit the cleartext refusal above and registered the public gateway.
+**Stand-in for the missing app fix:** with `adb root`, the app's stored `PUSH_GATEWAY<secret>`
+preference was set to `http://192.168.100.188:2586/_matrix/push/v1/notify`, which is what the
+lookup returns when it is allowed to run; the app itself then re-registered its pusher with that
+URL (Synapse `pushers` table). Evidence in the personal-agent vault,
+`evidence-2026-09-24/lan-push/`.
+
+| Step | Result |
+|---|---|
+| (a) app in background, Hamza (web) sends a DM | Synapse 200 to ntfy, `NtfyUpDistributor: Sending MESSAGE`, notification in the shade ~2 s later (`03`) |
+| (b) app force-stopped (`stopped=true`, no process) | same, plus `Start proc ... ai.hellorumi.messenger for service ... RaiseToForegroundService`, notification ~2 s (`05`) |
+| (c) Hamza voice-calls from web, app in background | heads-up "Teacher Hamza, Incoming call, Decline / Answer" (`12`); Answer -> both in the call, web "Call in progress" timer (`13`, `14`, `15`); hang up from web, both sides closed (`17`, `18`) |
+
+The first call attempt, while call URLs still pointed at the LAN IP, rang but failed on Answer
+with the mixed-content error above; the app had also cached that transport until it was
+restarted.
+
+#### What a real phone on a school LAN still needs
+
+1. **A name, not an IP.** A router DNS entry such as `rumi.lan` -> the server, and
+   `PUBLIC_BASE_URL=http://rumi.lan:8108`. The app already allows plain http to `*.lan`, so sign-in
+   and the gateway lookup work with no app change and `NTFY_BASE_URL` follows it
+   (`http://rumi.lan:2586`). Not tested: needs a router with local DNS.
+2. **Or an app fix** so a raw IP works: when the lookup fails, use the endpoint's own
+   `/_matrix/push/v1/notify` instead of the public gateway (`UnifiedPushGatewayUrlResolver.kt`),
+   plus a cleartext rule for private ranges.
+3. **HTTPS for calls from the phone** (and for the web app on other computers), in any case:
+   Element Call inside the app refuses every plain-http address except localhost. Caddy `tls
+   internal` with its root certificate installed on the phones (the fork trusts user CAs) is the
+   LAN route; a real domain is the easy one.
 
 ### What the teacher does once
 
@@ -413,9 +485,8 @@ cd .. && scripts/e2e.sh                       # confirmed still all passed (15 a
   project was exercised in this task -- confirming "a teacher with the app closed receives a
   notification" (issue #3's own done-when) needs the three manual steps above, then a real
   install, which is out of scope for what can be done "without Firebase or Apple keys".
-- **UnifiedPush: the Synapse -> ntfy hop.** Everything else was exercised on the emulator on
-  2026-09-24 (see "Emulator proof"). Synapse's own POST was refused by its private-IP blocklist;
-  a real deployment with ntfy on a public hostname, or `ip_range_whitelist` plus a Synapse
-  restart, is what closes it.
+- **UnifiedPush on a real phone.** The Synapse -> ntfy hop is proven with LAN mode, and the whole
+  chain on the emulator, but with the app's gateway lookup stood in for (see "LAN mode"). No real
+  phone on a real school LAN, and no public-domain deployment, has run it yet.
 - **Compound/APNs details.** Left commented out and undetailed on purpose -- see "APNs (iOS)"
   above.
