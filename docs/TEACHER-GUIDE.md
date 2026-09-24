@@ -196,12 +196,14 @@ once, when your admin gives you the ntfy address:
 If you opened Rumi before step 2, go to Rumi's **Settings**, then **Notifications**, turn **Enable
 notifications on this device** off and on again. Rumi then signs up with your school's ntfy.
 
-> **Notifications when the app is closed** work on our test phone with Rumi 0.1.4 or newer, also
-> on a school-network server that has only a number address (like `http://192.168.1.10:2586`):
-> a message shows up within seconds with Rumi in the background or fully closed, and a call from
-> the web rings the phone. It has not been tried on a real phone at a school yet
-> ([#3](https://github.com/Orenda-Project/rumi-messenger/issues/3)). Until your admin says it's on,
-> open the app a few times a day, or keep the web app open in a browser tab.
+With Rumi 0.1.4 or newer, that is all: the ntfy app pointed at your school's ntfy address, also
+when that address is only a number (like `http://192.168.1.10:2586`). Nothing else to set in
+Rumi. A message then shows up within seconds with Rumi in the background or fully closed, and a
+call from the web rings the phone. On an older Rumi, update it first.
+
+> **Coming:** we tested this on an Android emulator, not yet on a real phone at a school
+> ([#3](https://github.com/Orenda-Project/rumi-messenger/issues/3)). If notifications don't come,
+> tell your admin, and open the app a few times a day until it's fixed.
 
 ## 7. Save your backup code (do this on day one)
 

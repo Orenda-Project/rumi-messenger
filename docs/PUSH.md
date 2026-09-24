@@ -6,7 +6,7 @@ Two push paths exist. **The no-Google one (UnifiedPush + our own ntfy) is the on
 
 | Path | Who runs the server | Keys needed | State |
 |---|---|---|---|
-| **UnifiedPush + self-hosted ntfy** | us (`ntfy` service, `push` profile; started by `setup.sh` in LAN mode) | none | **Whole chain proven on the emulator** (app in background, app force-stopped, incoming call rings) with LAN mode, see "LAN mode" below. Since app v0.1.4 this works on a raw-IP LAN server with no hand-setting (the app derives the gateway from the ntfy address). Calls from the phone on a LAN still need HTTPS. |
+| **UnifiedPush + self-hosted ntfy** | us (`ntfy` service, `push` profile; started by `setup.sh` in LAN mode) | none | **Whole chain proven on the emulator** (app in background, app force-stopped, incoming call rings) with LAN mode, see "LAN mode" below. Since app v0.1.4 this works on a raw-IP LAN server with no hand-setting (the app derives the gateway from the ntfy address); proven with the v0.1.4 release APK on a fresh install. Not yet on a real phone. Calls from the phone on a LAN still need HTTPS. |
 | Firebase (FCM) via Sygnal | us (`sygnal` service, `push` profile) | Firebase service account + `google-services.json` + signed build | Gateway built, no keys. Unchanged, see "Sygnal" below. |
 
 **Before this change** the F-Droid/no-Google build showed "No distributors available" on every
@@ -154,6 +154,37 @@ Evidence: personal-agent vault `evidence-2026-09-24/push-fork/`.
 | (a) app in background, Hamza (web) sends a DM | `Received response to POST http://192.168.100.188:2586/_matrix/push/v1/notify: 200`, decrypted notification in the shade (`05`, `06`) |
 | (b) `am force-stop` (no process, notifications cleared), second DM | same 200; app woken by the push (`New message`, `handling pushData`), notification (`07`, `08`, `09`) |
 | (c) app force-stopped, Hamza voice-calls from web | same 200; heads-up "Teacher Hamza, Incoming call, Decline / Answer", still ringing ~40 s later (`10`, `11`) |
+
+#### Release build proof, 2026-09-24 (`ai.hellorumi.messenger` v0.1.4-rumi release APK, `LAN_IP=10.10.20.230`)
+
+The shipped APK, set up exactly the way TEACHER-GUIDE section 6 says, **nothing hand-set**. The
+laptop had moved networks (192.168.100.188 -> 10.10.20.230) and `setup.sh` was re-run with the new
+`LAN_IP` first. `pm clear ai.hellorumi.messenger` (wipes the v0.1.3 install with the hand-set
+gateway above), `rumi-v0.1.4-rumi-x86_64.apk` from the release (SHA256SUMS OK) installed over it
+(welcome screen: "Version 26.09.2-0.1.4-rumi"). In ntfy: Default server `http://10.10.20.230:2586`,
+battery-optimisation exempt. Then Rumi: sign in as Zara (`http://127.0.0.1:8108` via adb reverse),
+backup code, Allow notifications. No distributor dialog: the app picked ntfy by itself.
+
+Zara's pusher for the new device, read from the Synapse admin API:
+
+```
+before (old device, v0.1.3, hand-set): url http://192.168.100.188:2586/_matrix/push/v1/notify
+after  (new device, v0.1.4, app-registered): url     http://10.10.20.230:2586/_matrix/push/v1/notify
+                                              pushkey http://10.10.20.230:2586/upe36tK0qg6Sit?up=1
+```
+
+| Step | Result |
+|---|---|
+| (a) app in background, Hamza (web) sends a DM | `05:16:17 Received response to POST http://10.10.20.230:2586/_matrix/push/v1/notify: 200`; decrypted "Rumi · Teacher Hamza" notification in the shade within ~10 s (`05`, `06`) |
+| (b) `am force-stop` (no process), second DM | `05:17:04 ... notify: 200`; `Start proc ...:ai.hellorumi.messenger ... for service RaiseToForegroundService`, notification (`07`, `08`, `09`) |
+| (c) Hamza voice-calls from web | `05:17:44 ... notify: 200`; heads-up "Teacher Hamza · Rumi, Incoming call, Decline / Answer" (`10`); Answer, both in the call (phone call screen, web "Call in progress", `12`); hang up from the phone, both sides closed ("Call started (1:11)" on web, `13`) |
+
+Evidence: personal-agent vault `evidence-2026-09-24/push-v014/`.
+
+Side finding: `pm clear` does not log the old device out on the server, so the v0.1.3 device's
+pusher (old IP) stayed and every push to it logged `403: IP address blocked` (the whitelist now
+has only the new IP). Harmless, but a teacher who reinstalls leaves one behind; signing the old
+session out (Settings -> Sessions on the web app) removes it.
 
 #### What a real phone on a school LAN still needs
 
@@ -506,8 +537,8 @@ cd .. && scripts/e2e.sh                       # confirmed still all passed (15 a
   project was exercised in this task -- confirming "a teacher with the app closed receives a
   notification" (issue #3's own done-when) needs the three manual steps above, then a real
   install, which is out of scope for what can be done "without Firebase or Apple keys".
-- **UnifiedPush on a real phone.** The Synapse -> ntfy hop is proven with LAN mode, and the whole
-  chain on the emulator, but with the app's gateway lookup stood in for (see "LAN mode"). No real
-  phone on a real school LAN, and no public-domain deployment, has run it yet.
+- **UnifiedPush on a real phone.** The whole chain is proven on the emulator with the v0.1.4
+  release APK and nothing hand-set (see "LAN mode"). No real phone on a real school LAN, and no
+  public-domain deployment, has run it yet.
 - **Compound/APNs details.** Left commented out and undetailed on purpose -- see "APNs (iOS)"
   above.

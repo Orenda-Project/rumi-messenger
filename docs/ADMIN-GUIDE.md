@@ -282,8 +282,10 @@ the public IP. A server with no domain uses LAN mode, below.
 
 For a box in the school (teachers on the school Wi-Fi, no public domain):
 
-1. Give the box a **fixed IP** (a DHCP reservation on the router). Phones store push addresses
-   that contain it.
+1. Give the box a **fixed IP** (a DHCP reservation on the router), because `LAN_IP` is baked into
+   every phone's pusher and into Synapse's push whitelist: when our test laptop moved networks
+   (192.168.100.188 -> 10.10.20.230), push broke until `setup.sh` was re-run with the new IP (and
+   phones then need their ntfy Default server changed and Rumi's notifications toggled off and on).
 2. `LAN_IP` in `deploy/.env`: leave it blank and `setup.sh` picks the box's first IP
    (`hostname -I | awk '{print $1}'`) while `PUBLIC_DOMAIN` is `localhost`. Set it by hand if that
    picks the wrong network card. `LAN_IP=off` turns LAN mode off (then also set
@@ -299,9 +301,11 @@ For a box in the school (teachers on the school Wi-Fi, no public domain):
 
 What does not work yet over plain http on a LAN, stated plainly:
 
-- **The phone app refuses plain http to a bare IP.** Signing in to `http://192.168.x.y:8108`
-  and the push setup both fail. A router DNS name ending `.lan` (e.g. `rumi.lan`, set
-  `PUBLIC_BASE_URL=http://rumi.lan:8108`) is allowed by the app; not tested yet.
+- **The phone app refuses plain http to a bare IP for sign-in.** Signing in to
+  `http://192.168.x.y:8108` fails. A router DNS name ending `.lan` (e.g. `rumi.lan`, set
+  `PUBLIC_BASE_URL=http://rumi.lan:8108`) is allowed by the app; not tested yet. Push on a bare IP
+  works from app v0.1.4 (the phone only needs ntfy pointed at `http://<LAN_IP>:2586`,
+  [PUSH.md](PUSH.md#lan-mode-school-server-on-the-school-wi-fi-no-domain)).
 - **Calls from the phone app need HTTPS** (the in-app call screen blocks every plain-http address
   but localhost). So does the **web app on other computers** (it says "Rumi does not support this
   browser"). For those, use a real domain ([section 4](#4-go-live-on-a-real-domain)).
