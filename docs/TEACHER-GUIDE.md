@@ -65,7 +65,7 @@ nothing to install.
 
 ### In the Android app
 
-1. Open the app and tap **Sign in manually**. Don't use **Sign in with QR code** or **Create account**.
+1. Open the app and tap **Sign in manually**. Don't use **Sign in with QR code**.
 2. The app asks for an **account provider**. Clear the example text and type your school's full
    server address, including `https://`.
 
@@ -73,9 +73,8 @@ nothing to install.
 
    Always type the `https://` or `http://` part, exactly as your admin wrote it. If you forgot it
    and the app just shows a spinner, go back and type the address again with it.
-3. Tap **Continue**. The app checks the address, which can take up to a minute and a half with
-   a spinner -- that's normal, wait for it. The next screen says "You're about to sign in to" and
-   shows your server's address.
+3. Tap **Continue**. The app checks the address, which takes a couple of seconds. The next screen
+   says "You're about to sign in to" and shows your server's address.
 4. Type your **username** (`+923001234567`) and your **password**, then tap **Continue**.
 
    ![Sign in with username and password](img/teacher-2-sign-in.png)
@@ -127,7 +126,8 @@ Write to Rumi the way you would on WhatsApp, in your own words, in English or Ur
 | Homework, a video on a topic, exam checking, attendance | Ask for it in words, for example "homework for grade 6 science chapter 2" |
 
 **Where is +?** In a chat, **+** is the round button at the bottom left, next to the message box.
-The microphone at the bottom right records a voice note.
+The microphone at the bottom right records a voice note: tap it to start, tap the stop button when
+you're done, then tap send. (Unlike WhatsApp, you don't hold it down.)
 
 **Menus are numbered.** On WhatsApp, Rumi sometimes shows buttons. Here, it shows a numbered
 list instead. Reply with the number (for example `1`) or with the words.
@@ -166,9 +166,11 @@ Rumi doesn't respond to anything else, so the group stays a conversation between
 microphone to record a voice note.
 
 **Call someone.** Open a one-to-one chat. The phone and camera buttons at the top start a voice
-or video call. Your colleague's app rings (on the web: **Incoming voice call**, then **Join**).
-The first video call asks to use your camera: tap **While using the app**. To hang up, tap the red
-button. Each call stays in the chat as a **Call started** line. Phone and web can call each other.
+or video call. On the web your colleague sees **Incoming voice call**, then **Join**. The first
+video call asks to use your camera: tap **While using the app**. To hang up, tap the red button.
+Each call stays in the chat as a **Call started** line (on the web: **Voice call** / **Video call**);
+a call you missed looks the same, there is no separate "missed call" line yet. Calls from the web to
+the phone ring only when notifications are set up (see "About notifications" below).
 
 > **Not yet proven:** calls between two different buildings or networks, and on real phones
 > (we tested on one server with an Android emulator). If a call connects but you can't hear
