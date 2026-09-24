@@ -105,8 +105,9 @@ called **Rumi Announcements**, where your school shares updates.
 
 2. Rumi says hello: *"Hi, we're glad you're here. This is your space with Rumi. Ask us anything
    about your class, your lessons, or your day. You're not teaching alone."* If that first
-   message shows as "Waiting for this message" instead, don't worry: it was sent before your
-   phone existed. Just type your question; Rumi's reply to you will read normally.
+   message shows as "Waiting for this message" instead (the phone and the web say the same),
+   don't worry: it was sent before your phone existed. Just type your question; Rumi's reply to
+   you will read normally.
 3. Type your question and send it. Replies usually arrive within about 15 seconds.
 
 In the web app, you can also click **Talk to Rumi** on the home page at any time.
@@ -164,17 +165,24 @@ list that appears) to ask something, for example "@Rumi one warm-up for grade 3 
 also reply to one of Rumi's messages. If Rumi sends a numbered list, just reply with the number.
 Rumi doesn't respond to anything else, so the group stays a conversation between teachers.
 
-**Send photos, files and voice notes.** In any chat, tap **+** for photos and files. Hold the
-microphone to record a voice note.
+**Send photos, files and voice notes.** In any chat, tap **+** for photos and files. Tap the
+microphone to start a voice note, tap the stop button when you're done, then tap send.
 
 **Call someone.** Open a one-to-one chat. The phone and camera buttons at the top start a voice
 or video call. On the web there is one phone button and one camera button, and clicking one
-starts the call straight away (no "which kind of call?" question). Your colleague sees
-"*name* started a call" in the chat, with a **Join** button. The first video call asks to use your
-camera: tap **While using the app** (on the web, click **Allow**). To hang up, tap the red button.
-Each call stays in the chat as a **Call started** line (on the web: a call line that says **Call in
-progress** while it runs); a call you missed looks the same, there is no separate "missed call" line yet. Calls from the web to
-the phone ring only when notifications are set up (see "About notifications" below).
+starts the call straight away (no "which kind of call?" question). Your colleague's phone rings;
+on the web, your colleague sees "*name* started a call" in the chat, with a **Join** button. The
+first video call asks to use your camera: tap **While using the app** (on the web, click
+**Allow**). To hang up, tap the red button. If nobody answers, a call started on the web stops
+ringing by itself after about 30 seconds. Each call stays in the chat: on the phone as a **Call
+started** line, on the web as a **Voice call** or **Video call** line once it has ended. A call
+you missed looks the same; there is no separate "missed call" line yet. Calls from the web to the
+phone ring only when notifications are set up (see "About notifications" below).
+
+**On the web, after a voice call you started:** the chat can keep showing **Call started** with a
+timer that keeps counting, even though the call has ended and nobody is in it. This is a display
+fault in the web app, not a call that is still open. Reload the page (press F5) and the line
+changes to **Voice call**. Video calls don't do this.
 
 > **Not yet proven:** calls between two different buildings or networks, and on real phones
 > (we tested on one server with an Android emulator). If a call connects but you can't hear
@@ -227,18 +235,20 @@ most problems happen, so follow these steps in this order:
 3. The new device shows **Confirm it's you**. Choose one of these:
    - **Approve on my other phone**: your first phone or computer shows a prompt. Approve it there.
    - **Enter my backup code**: type the code from [section 7](#7-save-your-backup-code-do-this-on-day-one).
-4. When the new device says it's confirmed, you're done. Your old messages appear on it.
+     This choice only appears once you've saved a backup code. Without one, your only choices are
+     your other device or starting fresh.
+4. When the new device says **Device verified**, you're done. Your old messages appear on it.
 
 **If you see "Can't confirm? You can start fresh.", stop.** (On the web: a **Can't confirm?**
 button, then a screen asking "Are you sure you want to start fresh?")
 
 ![The start-fresh warning](img/teacher-6-reset-warning.png)
 
-Don't tap **Start fresh** (on the web, the red **Continue** on that screen) unless you've truly
-lost your backup code and every other device.
+Don't tap **Start fresh** (on the web, the red **Continue** on that screen, which then asks for
+your account password) unless you've truly lost your backup code and every other device.
 Starting fresh keeps your account and chat list. But every message you had before shows up as
-"Waiting for this message" and never opens. Go back, open your first device, or find your
-backup code, and try again. (App versions up to v0.1.1 word this screen as "reset your digital
+"Waiting for this message" (on the phone and the web) and never opens. Go back, open your first
+device, or find your backup code, and try again. (App versions up to v0.1.1 word this screen as "reset your digital
 identity", with a **Continue reset** button, as in the picture.)
 
 **Your messages always send.** An old phone or a half-finished sign-in left on your account no
@@ -266,12 +276,12 @@ messages, so never leave one signed in on a phone you've given away.
 |---|---|
 | A spinner that never stops after you type the server address | Check that you typed `https://` or `http://` at the start, then try again. If you can, copy the address exactly as your admin sent it. |
 | You're looking for a **Create account** button | There isn't one. Your school admin creates your account and gives you your phone-number username and a password. |
-| "Invalid username or password" | Type the username with the `+` and no spaces: `+923001234567`. Passwords are case-sensitive. If it still fails, ask your admin to reset your password. There's no "forgot password" email. |
+| "Invalid username or password" | Type the username with the `+` and no spaces: `+923001234567`. Passwords are case-sensitive. If it still fails, ask your admin to reset your password. There's no password reset in the app (no "Forgot password?" link, no email): ask your admin. |
 | A message has a red mark and says "Message not sent because you have not verified one or more of your devices" | Only app versions up to v0.1.1 do this. Install the newer app from your admin's link. Until then: press and hold the message, open the details, and tap **Send message anyway**, and tell your admin so they can remove your old sign-ins. |
 | You don't see a Rumi chat at all | Wait a minute, then pull the chat list down to refresh it. If Rumi still isn't there, tell your admin: the Rumi service may not be connected to your school's server yet. You can still chat with colleagues in the meantime. |
 | Rumi doesn't reply | Wait a minute, then send your message again. If Rumi still doesn't answer, tell your admin, because the Rumi service may be stopped. |
 | Rumi says it can't do something | Your school may not have switched that feature on yet. Tell your admin. |
-| Old messages show "Waiting for this message" | This device can't open them yet. Confirm it with your backup code or another device ([section 8](#8-use-a-second-phone-or-a-computer)). If you chose **Start fresh** earlier, those messages can't be recovered. |
+| Old messages show "Waiting for this message" (phone or web) | This device can't open them yet. Confirm it with your backup code or another device ([section 8](#8-use-a-second-phone-or-a-computer)). If you chose **Start fresh** earlier, those messages can't be recovered. |
 | A call connects, but there's no sound or picture | Your network may block calls, or the server isn't set up for calls between networks yet. Tell your admin. |
 | No notification for a new message | Check ntfy is installed and its Default server is your school's ntfy address ([section 6](#6-chat-and-call-your-colleagues)). Until your admin says notifications are on, this is expected while the app is closed. Open the app to check. |
 | You can't find a colleague | Type the start of their first or last name. If they still don't appear, their account may not exist yet. Ask your admin. |

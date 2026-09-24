@@ -45,6 +45,8 @@
   },
   "setting_defaults": {
     "UIFeature.registration": false,
+    "UIFeature.passwordReset": false,
+    "UIFeature.thirdPartyId": false,
     "custom_themes": [
       {
         "name": "Rumi",

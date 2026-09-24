@@ -180,6 +180,19 @@ with a real hostname for anything beyond one machine.
    concurrent participants.
 5. **Pre-existing rooms** keep `call.member` at 50 until an admin lowers it (above).
 6. **Headless screen share** used Chromium's fake capture source, not a real desktop.
+7. **Web "Call started" timer after a voice call the web user started (Element Web v1.12.29 bug,
+   client-side only).** The server side is clean: Element Call gives up ringing after ~30 s (or
+   on End call), sends the empty `org.matrix.msc3401.call.member` leave, its MSC4140 delayed leave
+   is already consumed, and LiveKit closes the room (IDLE_TIMEOUT). But in the caller's own tab the
+   DM tile stays "ongoing" and counts up forever: the header Voice call button goes through
+   RoomViewStore's `voiceOnly` path, which sets `call.presented = true` without opening the call
+   view, and when the widget closes itself (`models/Call: The widget died; treating this as a user
+   hangup`) nothing sets `presented` back to false, so `ElementCall.checkDestroy()` (which requires
+   `!presented`) never removes the Call from CallStore, and the RTC-notification tile renders as
+   `ongoing-call-dm`. The callee, other sessions and a reload all show the correct ended
+   "Voice call" tile; video calls open the call view and are not affected. No server or config
+   setting reaches this. Teacher workaround in TEACHER-GUIDE: reload the page. Evidence and repro:
+   DECISIONS.tsv row `web-voice-call-ghost-timer`.
 
 ## Capacity story (issue #2 asked for this explicitly)
 

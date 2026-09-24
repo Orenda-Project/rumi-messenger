@@ -273,8 +273,8 @@ won't push to a private IP, so `docker exec rumi-synapse getent hosts ntfy.<your
 the public IP. A server with no domain uses LAN mode, below.
 
 > **Coming:** the whole chain (message in the background, app force-stopped, incoming call
-> ringing) is proven on the emulator with LAN mode, but with one app step stood in for; no real
-> phone has run it yet ([#3](https://github.com/Orenda-Project/rumi-messenger/issues/3),
+> ringing) is proven on the emulator with LAN mode, and since app v0.1.4 nothing is hand-set (a
+> fresh install of the release APK registered its own LAN pusher); no real phone has run it yet ([#3](https://github.com/Orenda-Project/rumi-messenger/issues/3),
 > [PUSH.md](PUSH.md#lan-mode-school-server-on-the-school-wi-fi-no-domain)). The Firebase route
 > (Sygnal) is built but has no key.
 

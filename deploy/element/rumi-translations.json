@@ -14,6 +14,15 @@
   "auth|reset_password|other_devices_logout_warning_2": {
     "en": "If you want to retain access to your chat history in encrypted rooms, get a backup code or export your message keys from one of your other devices before proceeding."
   },
+  "create_room|join_rule_public_label": {
+    "en": "Anyone on this school server can find and join."
+  },
+  "create_room|join_rule_public_parent_space_label": {
+    "en": "Anyone on this school server can find and join, not just members of <SpaceName/>."
+  },
+  "create_space|public_description": {
+    "en": "Anyone on this school server can find and join. Best for communities"
+  },
   "encryption|access_secret_storage_dialog|alternatives": {
     "en": "Type the long code you wrote down when you saved your backup code."
   },
@@ -50,14 +59,32 @@
   "encryption|turn_on_key_storage_description": {
     "en": "This will allow you to view your chat history on any new devices."
   },
+  "encryption|verification|after_new_login|verify_this_device": {
+    "en": "Confirm it's you"
+  },
+  "encryption|verification|confirm_identity_description": {
+    "en": "Use your other phone or your backup code so this device can open your chats."
+  },
   "encryption|verification|confirm_identity_title": {
     "en": "Confirm it's you"
+  },
+  "encryption|verification|unverified_sessions_toast_description": {
+    "en": "Check that it's one of yours."
+  },
+  "encryption|verification|unverified_sessions_toast_title": {
+    "en": "Another device is signed in to your account"
   },
   "encryption|verification|use_another_device": {
     "en": "Approve on my other phone"
   },
   "encryption|verification|use_recovery_key": {
     "en": "Enter my backup code"
+  },
+  "encryption|verify_toast_description": {
+    "en": "Confirm this device with your other phone or your backup code so it can open your chats."
+  },
+  "encryption|verify_toast_title": {
+    "en": "Confirm it's you"
   },
   "error|session_restore|clear_storage_button": {
     "en": "Sign out"
@@ -95,6 +122,9 @@
   "restore_key_backup_dialog|recovery_key_mismatch_title": {
     "en": "Backup code mismatch"
   },
+  "room_settings|security|join_rule_public_description": {
+    "en": "Anyone on this school server can find and join."
+  },
   "settings|encryption|advanced|breadcrumb_page": {
     "en": "Start fresh"
   },
@@ -110,8 +140,29 @@
   "settings|encryption|advanced|breadcrumb_title_sync_failed": {
     "en": "Failed to sync chat backup. You need to start fresh."
   },
+  "settings|encryption|advanced|details_title": {
+    "en": "Device details"
+  },
+  "settings|encryption|advanced|export_keys": {
+    "en": "Save chat keys to a file"
+  },
+  "settings|encryption|advanced|import_keys": {
+    "en": "Load chat keys from a file"
+  },
+  "settings|encryption|advanced|other_people_device_description": {
+    "en": "Leave this off. When it is on, colleagues you haven't confirmed in person, and any device they haven't confirmed, can't read what you send."
+  },
+  "settings|encryption|advanced|other_people_device_label": {
+    "en": "Only send my messages to people I have confirmed"
+  },
   "settings|encryption|advanced|reset_identity": {
     "en": "Start fresh"
+  },
+  "settings|encryption|advanced|session_id": {
+    "en": "Device ID (for your admin):"
+  },
+  "settings|encryption|advanced|session_key": {
+    "en": "Device key (for your admin):"
   },
   "settings|encryption|confirm_key_storage_off": {
     "en": "Are you sure you want to keep chat backup turned off?"
@@ -127,6 +178,15 @@
   },
   "settings|encryption|delete_key_storage|title": {
     "en": "Are you sure you want to turn off chat backup and delete it?"
+  },
+  "settings|encryption|device_not_verified_button": {
+    "en": "Confirm it's you"
+  },
+  "settings|encryption|device_not_verified_description": {
+    "en": "Confirm this device with your other phone or your backup code to see your chat backup settings."
+  },
+  "settings|encryption|device_not_verified_title": {
+    "en": "Confirm it's you first"
   },
   "settings|encryption|key_storage|allow_key_storage": {
     "en": "Allow chat backup"
@@ -208,5 +268,59 @@
   },
   "settings|key_backup|setup_secure_backup|use_phrase_only_you_know": {
     "en": "Use a secret phrase only you know, and optionally save a backup code to use for backup."
+  },
+  "settings|sessions|unverified_session": {
+    "en": "Not confirmed"
+  },
+  "settings|sessions|unverified_sessions": {
+    "en": "Devices not confirmed"
+  },
+  "settings|sessions|unverified_sessions_explainer_1": {
+    "en": "These devices signed in with your password but were never confirmed with your other phone or your backup code."
+  },
+  "settings|sessions|unverified_sessions_explainer_2": {
+    "en": "Make sure you recognise each one. If you don't, sign it out and ask your admin to change your password."
+  },
+  "settings|sessions|unverified_sessions_list_description": {
+    "en": "Confirm your devices, or sign out the ones you don't recognise or use anymore."
+  },
+  "settings|sessions|verified_session": {
+    "en": "Confirmed device"
+  },
+  "settings|sessions|verified_sessions": {
+    "en": "Confirmed devices"
+  },
+  "settings|sessions|verify_session": {
+    "en": "Confirm this device"
+  },
+  "timeline|decryption_failure|blocked": {
+    "en": "The sender's app didn't share this message with this device"
+  },
+  "timeline|decryption_failure|historical_event_no_key_backup": {
+    "en": "Older messages can't be opened on this device"
+  },
+  "timeline|decryption_failure|historical_event_unverified_device": {
+    "en": "Confirm it's you on this device to open older messages"
+  },
+  "timeline|decryption_failure|sender_identity_previously_verified": {
+    "en": "The sender started fresh on their account"
+  },
+  "timeline|decryption_failure|sender_unsigned_device": {
+    "en": "Sent from a device the sender never confirmed"
+  },
+  "timeline|decryption_failure|unable_to_decrypt": {
+    "en": "Waiting for this message"
+  },
+  "timeline|m.room.encryption|enabled": {
+    "en": "Messages in this chat are private. Only the people in it can read them."
+  },
+  "timeline|m.room.encryption|enabled_dm": {
+    "en": "Messages here are private. Only you and %(displayName)s can read them."
+  },
+  "timeline|m.room.encryption|enabled_local": {
+    "en": "Messages in this chat will be private."
+  },
+  "timeline|m.room.encryption|state_enabled": {
+    "en": "Messages in this chat are private. Only the people in it can read them."
   }
 }
