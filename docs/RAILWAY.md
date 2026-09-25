@@ -63,7 +63,7 @@ configure the server in exactly the same way.
    [Railway's install page](https://docs.railway.com/cli), then check that `railway --version`
    prints a version.
 3. **This repository**, plus `python3`, `curl` and `openssl`, which most Linux and macOS
-   machines already have. The scripts run on macOS's built-in bash 3.2 as well as on Linux:
+   machines already have. `scripts/railway-deploy.sh` runs on macOS's built-in bash 3.2 too, so you don't need a newer bash from Homebrew:
 
    ```bash
    git clone https://github.com/Orenda-Project/rumi-messenger.git
@@ -341,4 +341,4 @@ On 2026-09-25, against `https://synapse-production-0d99.up.railway.app` and
 | Backup (`railway ssh` + `railway volume files`, [day-2](#11-day-2-update-back-up-remove)) | Run exactly as written above: `synapse.dump` 1.31 MB, restored into `postgres:18` with the same counts as live (67 users, 940 events, 84 rooms). synapse-volume 304 KB (signing key, homeserver.yaml, 7 media files). ntfy-volume 200 KB (two SQLite files, integrity ok). |
 | Two-person web call (one calls, the other joins) | Both connected to LiveKit, both published audio, `connectionType: tcp` |
 | Push: Synapse → public ntfy → a listener | Delivered (e2e check) |
-| Phone app (release v0.1.5) signs in to the public server | The sign-in reached the server and registered the phone as a device. The Android **emulator** on our test laptop then crashed while drawing the chat list. That's a known problem with this laptop's emulator (it crashed the same way with stock Element X on 2026-09-23). It's not a server problem. It still needs a check on a real phone: sign-in, greeting, and a notification with the app closed. |
+| Phone app (release v0.1.5) signs in to the public server | The sign-in reached the server and registered the phone as a device. The Android **emulator** on our test laptop then crashed while drawing the chat list. That's a known problem with this laptop's emulator (it crashed the same way with stock Element X on 2026-09-23). It's not a server problem. It still needs a check on a real phone: sign-in, and a notification with the app closed. Rumi's greeting on the phone can only be checked once Rumi is connected. |

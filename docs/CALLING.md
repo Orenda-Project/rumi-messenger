@@ -193,6 +193,24 @@ with a real hostname for anything beyond one machine.
    "Voice call" tile; video calls open the call view and are not affected. No server or config
    setting reaches this. Teacher workaround in TEACHER-GUIDE: reload the page. Evidence and repro:
    DECISIONS.tsv row `web-voice-call-ghost-timer`.
+8. **Web "Call in progress" tile after the browser was closed mid-call (Element Web v1.12.29,
+   client-side only; a different case from gap 7).** Reproduced on the Railway deployment on
+   2026-09-25: an answered 1:1 voice call, then both browsers were closed without End call. The
+   server side was clean: by the time we checked, both `org.matrix.msc3401.call.member` states
+   were the empty leave (the MSC4140 delayed leave does this when a client vanishes). Three minutes later, reopening either browser
+   (same profile) showed "Call in progress", a counting timer and a header **Join** button. It was
+   still there 60 s and 120 s later on the same page. **One more reload (F5) after that first load
+   cleared it** for the caller and for the callee: the tile became the ended "Voice call" line and
+   stayed that way (checked again after switching rooms and after *Clear cache and reload*). Our
+   reading, not yet confirmed in Element's code: the first load after reopening builds the tile
+   from Element's local sync cache (IndexedDB), saved while both people were still in the call,
+   and doesn't redraw it when the next sync brings the leave events. The next load starts from the
+   updated cache. No server setting reaches this. Nothing here depends on coturn or on LiveKit's
+   TCP-only media, but we have only reproduced it on Railway. The critic who first saw it reopened
+   the browser and treated that as the reload, which is why "reload" looked like it didn't work.
+   Teacher workaround in TEACHER-GUIDE: after reopening the browser, reload once more. Evidence:
+   `railway-docfix/04-*` (repro script `04-ghost-repro.py`), DECISIONS.tsv row
+   `web-ghost-tile-after-browser-close`.
 
 ## Capacity story (issue #2 asked for this explicitly)
 

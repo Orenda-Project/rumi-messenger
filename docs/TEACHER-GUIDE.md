@@ -184,6 +184,13 @@ timer that keeps counting, even though the call has ended and nobody is in it. T
 fault in the web app, not a call that is still open. Reload the page (press F5) and the line
 changes to **Voice call**. Video calls don't do this.
 
+**On the web, after closing the browser during a call:** if the browser was closed while you were
+still in a call, reopening it can show **Call in progress** with a timer and
+a **Join** button, even though the call ended long ago. Reopening the browser alone does not fix
+it, and waiting a few minutes doesn't either. Once the chat has loaded, reload the page one more time (press F5)
+and it changes to **Voice call**. Your colleague sees the same thing if they closed their browser
+too, and the same reload fixes it for them.
+
 > **Not yet proven:** calls between two different buildings or networks, and on real phones
 > (we tested on one server with an Android emulator). If a call connects but you can't hear
 > anything, tell your admin.

@@ -46,10 +46,11 @@ for s in synapse element ntfy livekit lk-jwt; do
 done
 
 # 3. one https domain per service, on the port its container listens on (= its PORT variable)
-declare -A PORTS=([synapse]=8008 [element]=8080 [ntfy]=8080 [livekit]=7880 [lk-jwt]=8080)
+# (a case, not `declare -A`: macOS ships bash 3.2, which has no associative arrays)
+port_of() { case "$1" in synapse) echo 8008;; livekit) echo 7880;; *) echo 8080;; esac; }
 domain_of() { railway domain list --service "$1" --json | python3 -c 'import json,sys; d=json.load(sys.stdin)["domains"]; print(d[0]["domain"] if d else "")'; }
 for s in synapse element ntfy livekit lk-jwt; do
-  [ -n "$(domain_of "$s")" ] || { log "generating domain for $s (port ${PORTS[$s]})"; railway domain --service "$s" --port "${PORTS[$s]}" >/dev/null; }
+  [ -n "$(domain_of "$s")" ] || { log "generating domain for $s (port $(port_of "$s"))"; railway domain --service "$s" --port "$(port_of "$s")" >/dev/null; }
 done
 
 # 4. volumes (Railway: one per service). `volume add` acts on the LINKED service.
@@ -68,7 +69,7 @@ fi
 # 6. secrets: generated ONCE, kept in the local file and in Railway variables only
 umask 077; touch "$ENV_FILE"; chmod 600 "$ENV_FILE"
 getv() { sed -n "s/^$1=//p" "$ENV_FILE" | tail -1; }
-putv() { if grep -q "^$1=" "$ENV_FILE"; then sed -i "s|^$1=.*|$1=$2|" "$ENV_FILE"; else echo "$1=$2" >> "$ENV_FILE"; fi; }
+putv() { if grep -q "^$1=" "$ENV_FILE"; then sed -i.bak "s|^$1=.*|$1=$2|" "$ENV_FILE" && rm -f "$ENV_FILE.bak"; else echo "$1=$2" >> "$ENV_FILE"; fi; }
 for k in REG_SHARED_SECRET ADMIN_PASSWORD RUMI_BOT_PASSWORD LIVEKIT_API_SECRET; do
   [ -n "$(getv "$k")" ] || putv "$k" "$(openssl rand -hex 24)"
 done

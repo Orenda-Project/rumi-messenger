@@ -91,7 +91,7 @@ set_env_var() {
   local escaped
   escaped="$(printf '%s' "${value}" | sed -e 's/[&/\]/\\&/g')"
   if grep -qE "^${key}=" "${file}"; then
-    sed -i "s|^${key}=.*|${key}=${escaped}|" "${file}"
+    sed -i.bak "s|^${key}=.*|${key}=${escaped}|" "${file}" && rm -f "${file}.bak"  # -i.bak: works on macOS sed too
     echo "updated"
   else
     printf '%s=%s\n' "${key}" "${value}" >> "${file}"
