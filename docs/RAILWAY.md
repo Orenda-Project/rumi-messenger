@@ -128,7 +128,7 @@ only and never committed. It's safe to run again.
 RUMI_ENV_FILE=deploy/railway/.env.railway scripts/e2e.sh
 ```
 
-Expect `19 passed, 0 failed`. On Railway, two checks differ from a self-hosted server:
+Expect `18 passed, 0 failed, 1 skipped`. On Railway, some checks differ from a self-hosted server:
 
 - The push check runs against the public ntfy. Synapse pushes a real message to it over the
   internet, and a listener receives it.
@@ -333,8 +333,8 @@ On 2026-09-25, against `https://synapse-production-0d99.up.railway.app` and
 | What | Result |
 |---|---|
 | All five images build locally, then run as a Railway-shaped stack (`deploy/railway/compose.local.yml`, Postgres at its default non-C locale like Railway's) | Built and ran, 18/19. The one failure was the call-ticket check: the local stack's made-up server name has no public DNS, so lk-jwt couldn't look it up. On Railway the name is real, and the check passes. |
-| `scripts/e2e.sh` against the public Railway addresses | **19/19** |
-| `scripts/e2e.sh` on the self-hosted dev stack after these changes | **19/19** (unchanged) |
+| `scripts/e2e.sh` against the public Railway addresses | **18 passed, 0 failed, 1 skipped** (coturn is not deployed on Railway) |
+| `scripts/e2e.sh` on the self-hosted dev stack after these changes | **19/19** (unchanged; coturn is deployed there) |
 | `scripts/teacher.sh` against the public server | Accounts created and joined to Rumi Announcements |
 | Three teachers in one encrypted room, each in their own browser session on the public web app | Each saw all three messages, none undecryptable |
 | Rumi's greeting to a new teacher (web) | Arrived and decrypted, but **not from a connected Rumi**. It came from a temporary test script on a laptop that ran only rumi-platform's Matrix welcome code (PR #104), greeted new accounts and never answered. It proves the channel code works against this server, not that Rumi is live here. Rumi is not connected ([step 6](#6-connect-rumi)). |
