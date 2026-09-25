@@ -15,3 +15,7 @@ backups/
 deploy/*recovery-key*
 deploy/rumi-release.keystore
 deploy/rumi-release-keystore.env
+# Railway (docs/RAILWAY.md): secrets live in Railway variables and in this local file only.
+deploy/railway/.env.railway
+deploy/railway/rumi-channel.env
+deploy/railway/*recovery-key*

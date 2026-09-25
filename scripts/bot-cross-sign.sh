@@ -20,9 +20,12 @@
 # scripts/bot-cross-sign/node_modules on first run (gitignored).
 set -euo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"; DEPLOY="$HERE/../deploy"; TOOL="$HERE/bot-cross-sign"
-# shellcheck disable=SC1091
-source "$DEPLOY/.env"
-HS="http://${BIND_ADDR:-127.0.0.1}:${SYNAPSE_PORT:-8008}"
+# RUMI_ENV_FILE / SYNAPSE_URL / RUMI_CHANNEL_ENV point it at another deployment (Railway:
+# scripts/railway-bootstrap.sh --cross-sign sets all three). Defaults = the compose stack.
+# shellcheck disable=SC1090
+source "${RUMI_ENV_FILE:-$DEPLOY/.env}"
+HS="${SYNAPSE_URL:-http://${BIND_ADDR:-127.0.0.1}:${SYNAPSE_PORT:-8008}}"
+CHANNEL_ENV="${RUMI_CHANNEL_ENV:-$DEPLOY/rumi-channel.env}"
 NODE="$HOME/.nvm/versions/node/v24.4.1/bin/node"; [ -x "$NODE" ] || NODE="$(command -v node)"
 NPM="$(dirname "$NODE")/npm"; [ -x "$NPM" ] || NPM="$(command -v npm)"
 
@@ -38,7 +41,7 @@ done
 if [ "$user" = "@rumi:${SERVER_NAME}" ]; then
   export XSIGN_PASSWORD="${XSIGN_PASSWORD:-$RUMI_BOT_PASSWORD}"
   if [ -z "$device" ]; then
-    tok="$(sed -n 's/^MATRIX_ACCESS_TOKEN=//p' "$DEPLOY/rumi-channel.env")"
+    tok="$(sed -n 's/^MATRIX_ACCESS_TOKEN=//p' "$CHANNEL_ENV")"
     device="$(curl -sS -H "Authorization: Bearer $tok" "$HS/_matrix/client/v3/account/whoami" \
       | python3 -c 'import json,sys;print(json.load(sys.stdin)["device_id"])')"
     unset tok

@@ -1,0 +1,11 @@
+#!/bin/sh
+# Sourced by nginx's /docker-entrypoint.sh before 18-load-element-modules.sh copies config.json.
+# Same substitution scripts/setup.sh does (render_template): __SERVER_NAME__, __PUBLIC_BASE_URL__.
+: "${SERVER_NAME:?set SERVER_NAME=\${{synapse.RAILWAY_PUBLIC_DOMAIN}} on the element service}"
+PUBLIC_BASE_URL="${PUBLIC_BASE_URL:-https://${SERVER_NAME}}"
+for pair in config.template.json:config.json welcome.template.html:welcome.html home.template.html:home.html; do
+  sed -e "s|__SERVER_NAME__|${SERVER_NAME}|g" -e "s|__PUBLIC_BASE_URL__|${PUBLIC_BASE_URL}|g" \
+    "/rumi-templates/${pair%%:*}" > "/app/${pair##*:}"
+done
+echo "rumi: rendered config.json/welcome.html/home.html for ${SERVER_NAME} (${PUBLIC_BASE_URL})"
+export ELEMENT_WEB_PORT="${PORT:-80}"

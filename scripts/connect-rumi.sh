@@ -23,7 +23,8 @@ fi
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" >/dev/null 2>&1 && pwd)"
 REPO_ROOT="$(cd -- "${SCRIPT_DIR}/.." >/dev/null 2>&1 && pwd)"
-CHANNEL_ENV_FILE="${REPO_ROOT}/deploy/rumi-channel.env"
+# RUMI_CHANNEL_ENV=deploy/railway/rumi-channel.env connects a Railway deployment (docs/RAILWAY.md).
+CHANNEL_ENV_FILE="${RUMI_CHANNEL_ENV:-${REPO_ROOT}/deploy/rumi-channel.env}"
 
 TARGET_DIR_INPUT="$1"
 if [[ ! -d "${TARGET_DIR_INPUT}" ]]; then

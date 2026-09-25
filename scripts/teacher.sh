@@ -13,9 +13,11 @@
 # bash + curl + python3 only, admin-token pattern lifted straight from scripts/devices.sh.
 set -euo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"; DEPLOY="$HERE/../deploy"
-# shellcheck disable=SC1091
-source "$DEPLOY/.env"
-HS="http://${BIND_ADDR:-127.0.0.1}:${SYNAPSE_PORT:-8008}"
+# RUMI_ENV_FILE=deploy/railway/.env.railway (or any deployment's settings file carrying
+# SYNAPSE_URL, SERVER_NAME, ADMIN_USER, ADMIN_PASSWORD) targets that server over its public URL.
+# shellcheck disable=SC1090
+source "${RUMI_ENV_FILE:-$DEPLOY/.env}"
+HS="${SYNAPSE_URL:-http://${BIND_ADDR:-127.0.0.1}:${SYNAPSE_PORT:-8008}}"
 SERVER_NAME="${SERVER_NAME:-localhost}"
 ANNOUNCE_ALIAS="%23rumi-announcements:${SERVER_NAME}"
 

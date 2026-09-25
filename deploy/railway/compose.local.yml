@@ -1,0 +1,57 @@
+# Throwaway local proof of the deploy/railway/* images BEFORE touching Railway: same images, same
+# env shape Railway gives (PORT, DATABASE_URL, RAILWAY_TCP_PROXY_*), scratch ports so it never
+# collides with the dev stack. Postgres is left at its default (non-C) locale on purpose, like
+# Railway's, so the entrypoint's C-collated database creation is exercised.
+#   docker compose -f deploy/railway/compose.local.yml -p rumi-railway-local up -d --build
+#   RUMI_ENV_FILE=deploy/railway/local.env scripts/e2e.sh
+#   docker compose -f deploy/railway/compose.local.yml -p rumi-railway-local down -v
+name: rumi-railway-local
+x-secrets: &secrets
+  REG_SHARED_SECRET: local-only-reg-secret
+services:
+  postgres:
+    image: postgres:16.15-alpine
+    environment: { POSTGRES_USER: postgres, POSTGRES_PASSWORD: localpw, POSTGRES_DB: railway }
+    healthcheck: { test: ["CMD-SHELL", "pg_isready -U postgres"], interval: 3s, retries: 30 }
+  synapse:
+    build: { context: ../.., dockerfile: deploy/railway/synapse/Dockerfile }
+    depends_on: { postgres: { condition: service_healthy } }
+    environment:
+      <<: *secrets
+      PORT: "8008"
+      SERVER_NAME: railway.local.test
+      PUBLIC_BASE_URL: http://127.0.0.1:8308
+      DATABASE_URL: postgresql://postgres:localpw@postgres:5432/railway
+      LIVEKIT_SERVICE_URL: http://127.0.0.1:8380
+    volumes: [synapse-data:/data]
+    ports: ["127.0.0.1:8308:8008"]
+  element:
+    build: { context: ../.., dockerfile: deploy/railway/element/Dockerfile }
+    environment: { PORT: "8080", SERVER_NAME: railway.local.test, PUBLIC_BASE_URL: "http://127.0.0.1:8308" }
+    ports: ["127.0.0.1:8382:8080"]
+  ntfy:
+    build: { context: ../.., dockerfile: deploy/railway/ntfy/Dockerfile }
+    environment: { PORT: "8080", NTFY_BASE_URL: "http://127.0.0.1:2786" }
+    volumes: [ntfy-data:/var/lib/ntfy]
+    ports: ["127.0.0.1:2786:8080"]
+  livekit:
+    build: { context: ../.., dockerfile: deploy/railway/livekit/Dockerfile }
+    environment:
+      PORT: "7880"
+      LIVEKIT_API_KEY: lklocal
+      LIVEKIT_API_SECRET: local-only-livekit-secret-0123456789
+      RAILWAY_TCP_PROXY_DOMAIN: localhost
+      RAILWAY_TCP_PROXY_PORT: "17981"
+      RAILWAY_TCP_APPLICATION_PORT: "7881"
+      LK_JWT_URL: http://lk-jwt:8080
+    ports: ["127.0.0.1:7980:7880", "127.0.0.1:17981:7881"]
+  lk-jwt:
+    build: { context: ../.., dockerfile: deploy/railway/lk-jwt/Dockerfile }
+    environment:
+      LIVEKIT_URL: ws://livekit:7880
+      LIVEKIT_KEY: lklocal
+      LIVEKIT_SECRET: local-only-livekit-secret-0123456789
+      LIVEKIT_FULL_ACCESS_HOMESERVERS: railway.local.test
+      LIVEKIT_CS_API_URL_OVERRIDES: railway.local.test=http://synapse:8008
+    ports: ["127.0.0.1:8380:8080"]
+volumes: { synapse-data: {}, ntfy-data: {} }

@@ -126,6 +126,9 @@ scripts/reset.sh     # asks you to type RESET; deletes all data, no undo
 
 ## 4. Go live on a real domain
 
+**No server of your own?** [RAILWAY.md](RAILWAY.md) puts the whole thing on Railway with real HTTPS
+in about 20 minutes, no domain needed. Calls there are best effort (TCP only, no UDP).
+
 **If you ran the trial on this same server, run `scripts/reset.sh` first.** The trial's
 `localhost` accounts can't be moved to your domain.
 

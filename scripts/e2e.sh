@@ -8,7 +8,9 @@ set -uo pipefail
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" >/dev/null 2>&1 && pwd)"
 REPO_ROOT="$(cd -- "${SCRIPT_DIR}/.." >/dev/null 2>&1 && pwd)"
 DEPLOY_DIR="${REPO_ROOT}/deploy"
-ENV_FILE="${DEPLOY_DIR}/.env"
+# RUMI_ENV_FILE points at another deployment's settings, e.g. deploy/railway/.env.railway
+# (docs/RAILWAY.md); that file carries SYNAPSE_URL/ELEMENT_URL (public https) and COTURN=off.
+ENV_FILE="${RUMI_ENV_FILE:-${DEPLOY_DIR}/.env}"
 
 if [[ ! -f "${ENV_FILE}" ]]; then
   echo "FAIL: ${ENV_FILE} not found -- run scripts/setup.sh first"
@@ -25,8 +27,8 @@ SYNAPSE_PORT="${SYNAPSE_PORT:-8008}"
 ELEMENT_PORT="${ELEMENT_PORT:-8082}"
 TURN_PORT="${TURN_PORT:-3478}"
 RUMI_CONTAINER_PREFIX="${RUMI_CONTAINER_PREFIX:-rumi}"
-SYNAPSE_URL="http://${BIND_ADDR}:${SYNAPSE_PORT}"
-ELEMENT_URL="http://${BIND_ADDR}:${ELEMENT_PORT}"
+SYNAPSE_URL="${SYNAPSE_URL:-http://${BIND_ADDR}:${SYNAPSE_PORT}}"
+ELEMENT_URL="${ELEMENT_URL:-http://${BIND_ADDR}:${ELEMENT_PORT}}"
 
 PASS_COUNT=0
 FAIL_COUNT=0
@@ -341,9 +343,11 @@ if [[ "${REGISTER_OK}" == "1" ]]; then
   #     subscriber, i.e. Synapse -> ntfy -> subscriber really happened. Falsifiable: without
   #     ip_range_whitelist Synapse logs "403: IP address blocked" and nothing arrives.
   #     Not in LAN mode (LAN_IP empty/off) -> PASS with nothing checked, like CALLS=off below.
+  #     A PUBLIC https ntfy (Railway, docs/RAILWAY.md) runs the same check: there Synapse reaches
+  #     ntfy over the internet, so no whitelist is involved, but the chain is the same one.
   # -------------------------------------------------------------------------
   PUSH_SUB_FILE=""
-  if [[ -n "${LAN_IP:-}" && "${LAN_IP}" != "off" && -n "${NTFY_BASE_URL:-}" ]]; then
+  if [[ -n "${NTFY_BASE_URL:-}" ]] && { [[ -n "${LAN_IP:-}" && "${LAN_IP}" != "off" ]] || [[ "${NTFY_BASE_URL}" == https://* ]]; }; then
     PUSH_TOPIC="upe2${EPOCH}"   # ntfy treats only "up" + exactly 12 chars as a UnifiedPush topic
     PUSH_SUB_FILE="$(mktemp)"
     curl -sN --max-time 20 "${NTFY_BASE_URL}/${PUSH_TOPIC}/json" > "${PUSH_SUB_FILE}" 2>/dev/null &
@@ -373,7 +377,7 @@ if [[ "${REGISTER_OK}" == "1" ]]; then
   fi
 
   if [[ -z "${PUSH_SUB_FILE}" ]]; then
-    check "LAN mode: Synapse pushes to ntfy (not in LAN mode, nothing to check)" 1
+    check "push: Synapse pushes to ntfy (not in LAN mode and no public ntfy, nothing to check)" 1
   else
     PUSH_OK=0
     for _i in $(seq 1 15); do
@@ -382,7 +386,7 @@ if [[ "${REGISTER_OK}" == "1" ]]; then
     done
     kill "${PUSH_SUB_PID}" 2>/dev/null
     PUSH_DETAIL="nothing reached ${NTFY_BASE_URL}/${PUSH_TOPIC} in 15s; synapse log: $(docker logs --since 60s "${RUMI_CONTAINER_PREFIX}-synapse" 2>&1 | grep -o "${PUSH_TOPIC}[^\"]*" | tail -1)"
-    check "LAN mode: Synapse pushed A's DM to B's pusher on ntfy and a subscriber got it (${NTFY_BASE_URL})" "${PUSH_OK}" "${PUSH_DETAIL}"
+    check "push: Synapse pushed A's DM to B's pusher on ntfy and a subscriber got it (${NTFY_BASE_URL})" "${PUSH_OK}" "${PUSH_DETAIL}"
     rm -f "${PUSH_SUB_FILE}"
   fi
 
@@ -439,13 +443,24 @@ if [[ "${REGISTER_OK}" == "1" ]]; then
   if [[ "${TURN_URIS_OK}" == "1" && -n "${TURN_USERNAME}" && -n "${TURN_PASSWORD}" && -n "${TURN_TTL}" ]]; then
     TURN_OK=1
   fi
-  check "GET /_matrix/client/v3/voip/turnServer returns TURN credentials (Synapse-side config only -- does NOT prove coturn is up, see next check)" "${TURN_OK}" \
-    "uris_nonempty=${TURN_URIS_OK} username='${TURN_USERNAME}' password_set=$([[ -n "${TURN_PASSWORD}" ]] && echo yes || echo no) ttl='${TURN_TTL}'"
+  if [[ "${COTURN:-on}" == "off" ]]; then
+    # A deployment with no coturn (Railway: no UDP, docs/RAILWAY.md). Still falsifiable: Synapse
+    # must advertise NO TURN server rather than a dead one. The liveness check below then has
+    # nothing to test (TURN_OK=0 with its own PASS line).
+    NO_TURN=0; [[ "${TURN_URIS_OK}" == "0" ]] && NO_TURN=1
+    check "COTURN=off: Synapse advertises no TURN server (none deployed, so none may be handed out)" "${NO_TURN}" "turnServer returned: ${TURN_JSON:0:160}"
+    TURN_OK=0
+  else
+    check "GET /_matrix/client/v3/voip/turnServer returns TURN credentials (Synapse-side config only -- does NOT prove coturn is up, see next check)" "${TURN_OK}" \
+      "uris_nonempty=${TURN_URIS_OK} username='${TURN_USERNAME}' password_set=$([[ -n "${TURN_PASSWORD}" ]] && echo yes || echo no) ttl='${TURN_TTL}'"
+  fi
 
   COTURN_CONTAINER="${RUMI_CONTAINER_PREFIX}-coturn"
   TURN_LIVE_OK=0
   TURN_LIVE_DETAIL="skipped: no credentials to test (previous check failed)"
-  if [[ "${TURN_OK}" == "1" ]]; then
+  if [[ "${COTURN:-on}" == "off" ]]; then
+    TURN_LIVE_OK=1; TURN_LIVE_DETAIL=""
+  elif [[ "${TURN_OK}" == "1" ]]; then
     if [[ "$(docker inspect -f '{{.State.Running}}' "${COTURN_CONTAINER}" 2>/dev/null)" != "true" ]]; then
       TURN_LIVE_DETAIL="container ${COTURN_CONTAINER} not found or not running"
     else
@@ -461,7 +476,7 @@ if [[ "${REGISTER_OK}" == "1" ]]; then
       fi
     fi
   fi
-  check "coturn is alive and honors the Synapse-issued TURN credentials (docker exec turnutils_uclient ALLOCATE)" "${TURN_LIVE_OK}" "${TURN_LIVE_DETAIL}"
+  check "coturn is alive and honors the Synapse-issued TURN credentials (docker exec turnutils_uclient ALLOCATE)${COTURN:+ [COTURN=${COTURN}: nothing to test]}" "${TURN_LIVE_OK}" "${TURN_LIVE_DETAIL}"
 
   # -------------------------------------------------------------------------
   # 7b. The call transport Synapse ADVERTISES must actually work (Element X can only call

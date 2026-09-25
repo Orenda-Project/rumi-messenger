@@ -1,0 +1,17 @@
+# Build context for deploy/railway/*/Dockerfile (context = repo root). Secrets and runtime data
+# never enter an image.
+.git
+backups
+node_modules
+**/node_modules
+deploy/synapse/data
+deploy/.env
+deploy/*.env
+deploy/*keystore*
+deploy/*recovery-key*
+deploy/sygnal
+deploy/coturn
+deploy/livekit/livekit.yaml
+deploy/railway/.env.railway
+deploy/railway/rumi-channel.env
+deploy/railway/*recovery-key*
