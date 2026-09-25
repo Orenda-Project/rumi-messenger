@@ -2,7 +2,11 @@
 
 This page puts a working Rumi Messenger on the internet with real HTTPS, without owning a server
 or a domain. You need a Railway account, a laptop with a terminal, and about 20 minutes. At the
-end, teachers sign in from the phone app or a browser and Rumi greets them.
+end, teachers sign in from the phone app or a browser, chat, and call each other.
+
+Rumi itself (the teaching companion who replies) is **not** part of this page's deployment. The
+messenger works on its own. Connecting Rumi is a separate step, done later: see
+[step 6](#6-connect-rumi).
 
 [Railway](https://railway.com) is a hosting service: it builds each part of Rumi Messenger from
 this repository, runs it, and gives each part its own `https://….up.railway.app` address with a
@@ -13,8 +17,8 @@ setup has everything, including calls that work on every network. Railway is the
 with one limit on calls, explained [below](#what-does-not-work-on-railway).
 
 **Proven on 2026-09-25.** `scripts/e2e.sh` passed 19 of 19 checks against the public Railway
-addresses. Three teachers chatted in one encrypted room from three separate browsers. Rumi's
-greeting arrived and decrypted. A two-person web call connected, with its media carried over TCP.
+addresses. Three teachers chatted in one encrypted room from three separate browsers. A two-person
+web call connected, with its media carried over TCP.
 The evidence is listed [at the end](#what-we-tested).
 
 ## On this page
@@ -59,7 +63,7 @@ configure the server in exactly the same way.
    [Railway's install page](https://docs.railway.com/cli), then check that `railway --version`
    prints a version.
 3. **This repository**, plus `python3`, `curl` and `openssl`, which most Linux and macOS
-   machines already have:
+   machines already have. The scripts run on macOS's built-in bash 3.2 as well as on Linux:
 
    ```bash
    git clone https://github.com/Orenda-Project/rumi-messenger.git
@@ -136,15 +140,27 @@ the Rumi sign-in page.
 
 ## 6. Connect Rumi
 
-Rumi (rumi-platform) signs in to this server as `@rumi`, exactly as it would on a self-hosted
-one. Only the address changes. Follow [Admin guide section 6](ADMIN-GUIDE.md#6-connect-rumi),
-with one change in step 2. Copy the Railway login instead of the local one:
+**Today Rumi is not connected to this Railway deployment.** The messenger works on its own:
+teachers sign in, chat and call. Messages to `@rumi` get no reply until Rumi is connected. Step 4
+only creates Rumi's *account* and writes its login to `deploy/railway/rumi-channel.env`; nothing
+on Railway runs Rumi.
+
+Rumi is a separate program, [rumi-platform](https://github.com/Orenda-Project/rumi-platform). It
+talks to this server through its Matrix channel, which is still in review
+([rumi-platform#104](https://github.com/Orenda-Project/rumi-platform/pull/104), not merged). It is
+a long-running bot, so it has to run somewhere that stays on. Connecting it is the same on Railway
+as on a self-hosted server: rumi-platform gets `MATRIX_HOMESERVER_URL`, `MATRIX_ACCESS_TOKEN` and
+`MATRIX_USER_ID`, and only the server address differs. Follow [RUMI-INTEGRATION.md](RUMI-INTEGRATION.md),
+and when it copies the login, use the Railway one:
 
 ```bash
 RUMI_CHANNEL_ENV=deploy/railway/rumi-channel.env scripts/connect-rumi.sh /path/to/rumi-platform
 ```
 
-Start Rumi once so its device exists on the server, then remove the red shield from its replies:
+After Rumi has started once, so that its device exists on the server, remove the red shield from
+its replies. This step needs **Node.js 22 or newer** on your laptop (`node --version`). The script
+installs matrix-js-sdk 42, which requires Node 22, and its install step runs silently, so an older
+Node gives you no warning:
 
 ```bash
 scripts/railway-bootstrap.sh --cross-sign
@@ -241,6 +257,19 @@ Stated plainly, so nobody files these as bugs:
   Caddy. On Railway there is no proxy of ours in front of Synapse, so the admin API is reachable
   from the internet. It still requires an admin login, and account creation still requires the
   shared secret. Keep the admin password long, and don't use the admin account day to day.
+  Every admin password login creates a new admin session (a full-power token). The scripts log
+  theirs out when they finish. If you log in by hand, log out afterwards:
+  `curl -X POST -H "Authorization: Bearer $ADMIN_TOKEN" $SYNAPSE_URL/_matrix/client/v3/logout`.
+  To see or clear leftover admin sessions, see "Admin sessions" in [RUNBOOK.md](RUNBOOK.md#admin-sessions-dont-leave-tokens-behind).
+- **Someone holding a sign-up token can still learn whether a phone number has an account.**
+  Usernames are phone numbers. Without a login, the server no longer says whether a number is
+  taken: "is this username free?" (`/register/available`) always answers yes, sign-up only reports
+  a taken name after the one-time token has been accepted, and profiles (display names) need a
+  login (`inhibit_user_in_use_error` and `require_auth_for_profile_requests`, set in
+  `deploy/synapse/patch_homeserver.py`). What's left: someone who has a valid registration token,
+  or any signed-in teacher (the directory search is meant to find colleagues), can still find out.
+  Wrong-password logins give the same answer for real and made-up numbers and are rate limited.
+  Treat the teacher list as known to staff, and give out registration tokens one at a time.
 - **One copy of each service.** Synapse writes to its volume, so you can't scale it to several
   replicas. A school pilot doesn't need to.
 
@@ -249,14 +278,50 @@ Stated plainly, so nobody files these as bugs:
 - **Update** after a `git pull`: `scripts/railway-deploy.sh` rebuilds and redeploys every
   service. `SERVICES="element" scripts/railway-deploy.sh` redeploys just one.
 - **Logs:** `railway logs --service synapse` (or any other service name).
-- **Back up:**
-  - The database: Railway Postgres → *Backups* in the dashboard, or
-    `railway connect Postgres` then `pg_dump synapse`.
-  - Synapse's volume (the signing key, homeserver.yaml, uploaded photos):
-    `railway service link synapse`, then `railway volume files download /<file> ./<file>`.
-  - Your laptop's `deploy/railway/` files.
+- **Back up.** Railway reaches the database and the volumes over SSH, so register your laptop's
+  SSH key with Railway **once**. Without it, every command below fails with "No registered SSH keys
+  found":
 
-  Losing the signing key or `REG_SHARED_SECRET` doesn't lose messages. Losing the database does.
+  ```bash
+  railway ssh keys add       # once per laptop. No key yet? Run ssh-keygen -t ed25519 first.
+  railway ssh keys list      # shows the key
+  ```
+
+  Then, from the repository folder, make one backup folder outside the repository and fill it:
+
+  ```bash
+  B="$HOME/rumi-backup-$(date +%F)"; mkdir -p "$B"
+  # 1. The database: every account and message. It is called "synapse", not "railway".
+  railway ssh --service Postgres -- pg_dump -U postgres -Fc synapse > "$B/synapse.dump"
+  # 2. Synapse's volume: the signing key, homeserver.yaml, uploaded photos.
+  railway volume files --volume synapse-volume download / "$B/synapse-volume"
+  # 3. ntfy's volume: which phones get notifications.
+  railway volume files --volume ntfy-volume download / "$B/ntfy-volume"
+  # 4. Your laptop's secrets (the admin password and the shared secret are in .env.railway).
+  cp -p deploy/railway/.env.railway "$B/"
+  cp -p deploy/railway/rumi-channel.env deploy/railway/rumi-cross-signing-recovery-key.txt "$B/" 2>/dev/null || true
+  chmod -R go-rwx "$B"
+  ls -laR "$B" | head -40
+  ```
+
+  `pg_dump` runs *inside* Railway's Postgres, so you need nothing extra installed, and the dump
+  matches the server's Postgres version. It is not a command you type into `psql`. The volume names
+  come from `railway volume list`. `--volume` goes straight after `files`. Without it, the command
+  stops to ask which volume you mean.
+
+  Check what you got. For a small pilot, `synapse.dump` is about 1 MB, and it grows with messages.
+  The files that matter most:
+
+  | File in the backup | What it is | If you lose it |
+  |---|---|---|
+  | `synapse.dump` | the database: accounts, rooms, messages | **Everything is gone.** |
+  | `synapse-volume/<server address>.signing.key` | the server's signing key | Messages survive. Put this copy back, with `railway volume files --volume synapse-volume upload`. |
+  | `synapse-volume/homeserver.yaml` | Synapse's settings, including three secrets (`registration_shared_secret`, `macaroon_secret_key`, `form_secret`) | Put this copy back the same way. The start-up script re-applies its settings on every boot. |
+  | `rumi-cross-signing-recovery-key.txt` | Rumi's cross-signing recovery key (exists only after [step 6](#6-connect-rumi)) | Rumi's identity has to be reset, and teachers see a warning. |
+
+  The backup holds secrets. Keep it off shared drives. To check that a dump is readable:
+  `pg_restore --list "$B/synapse.dump" | head` (this needs a local `pg_restore` of version 18 or
+  newer). Or restore it into a scratch `postgres:18` container.
 - **Remove everything:** `railway delete --project rumi-messenger --yes`. This deletes the
   database and all messages permanently.
 
@@ -272,7 +337,8 @@ On 2026-09-25, against `https://synapse-production-0d99.up.railway.app` and
 | `scripts/e2e.sh` on the self-hosted dev stack after these changes | **19/19** (unchanged) |
 | `scripts/teacher.sh` against the public server | Accounts created and joined to Rumi Announcements |
 | Three teachers in one encrypted room, each in their own browser session on the public web app | Each saw all three messages, none undecryptable |
-| Rumi's greeting to a new teacher (web) | Arrived and decrypted |
+| Rumi's greeting to a new teacher (web) | Arrived and decrypted, but **not from a connected Rumi**. It came from a temporary test script on a laptop that ran only rumi-platform's Matrix welcome code (PR #104), greeted new accounts and never answered. It proves the channel code works against this server, not that Rumi is live here. Rumi is not connected ([step 6](#6-connect-rumi)). |
+| Backup (`railway ssh` + `railway volume files`, [day-2](#11-day-2-update-back-up-remove)) | Run exactly as written above: `synapse.dump` 1.31 MB, restored into `postgres:18` with the same counts as live (67 users, 940 events, 84 rooms). synapse-volume 304 KB (signing key, homeserver.yaml, 7 media files). ntfy-volume 200 KB (two SQLite files, integrity ok). |
 | Two-person web call (one calls, the other joins) | Both connected to LiveKit, both published audio, `connectionType: tcp` |
 | Push: Synapse → public ntfy → a listener | Delivered (e2e check) |
 | Phone app (release v0.1.5) signs in to the public server | The sign-in reached the server and registered the phone as a device. The Android **emulator** on our test laptop then crashed while drawing the chat list. That's a known problem with this laptop's emulator (it crashed the same way with stock Element X on 2026-09-23). It's not a server problem. It still needs a check on a real phone: sign-in, greeting, and a notification with the app closed. |

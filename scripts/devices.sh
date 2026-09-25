@@ -18,6 +18,7 @@ enc="$(python3 -c 'import sys,urllib.parse;print(urllib.parse.quote(sys.argv[1],
 tok="$(curl -sS -X POST "$HS/_matrix/client/v3/login" -H 'Content-Type: application/json' \
   -d "{\"type\":\"m.login.password\",\"identifier\":{\"type\":\"m.id.user\",\"user\":\"${ADMIN_USER}\"},\"password\":\"${ADMIN_PASSWORD}\"}" \
   | python3 -c 'import json,sys;print(json.load(sys.stdin)["access_token"])')"
+trap 'curl -sS -o /dev/null -X POST -H "Authorization: Bearer $tok" "$HS/_matrix/client/v3/logout" || true' EXIT  # never leave an admin token behind (see teacher.sh)
 devices="$(curl -sS -H "Authorization: Bearer $tok" "$HS/_synapse/admin/v2/users/$enc/devices")"
 case "$cmd" in
   list)

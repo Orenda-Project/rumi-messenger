@@ -47,6 +47,10 @@ tok="$(curl -sS -X POST "$HS/_matrix/client/v3/login" -H 'Content-Type: applicat
   -d "{\"type\":\"m.login.password\",\"identifier\":{\"type\":\"m.id.user\",\"user\":\"${ADMIN_USER}\"},\"password\":\"${ADMIN_PASSWORD}\"}" \
   | python3 -c 'import json,sys;print(json.load(sys.stdin)["access_token"])')"
 [ -n "$tok" ] || { echo "ERROR: could not log in as admin (${ADMIN_USER})" >&2; exit 1; }
+# Log this admin session out on every exit (success or error): each password login mints a new
+# admin device + token, and without this every run left one behind forever (47 found live on
+# Railway, 25 Sep 2026 -- each a full-power admin credential that nothing ever revoked).
+trap 'curl -sS -o /dev/null -X POST -H "Authorization: Bearer $tok" "$HS/_matrix/client/v3/logout" || true' EXIT
 
 # Does the account already exist? GET returns 404 if not, 200 (with a body) if it does.
 exists_http="$(curl -sS -o /tmp/teacher-sh-get.json -w '%{http_code}' \

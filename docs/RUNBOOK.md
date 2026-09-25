@@ -495,6 +495,32 @@ curl -s -X POST "http://127.0.0.1:8108/_synapse/admin/v1/deactivate/@newteacher:
 
 Both verified live above against a throwaway `@runbooktest:localhost` account.
 
+## Admin sessions: don't leave tokens behind
+
+Each `m.login.password` login as the admin creates a new admin device with its own token, and
+that token stays valid until someone logs it out. `scripts/teacher.sh`, `scripts/devices.sh` and
+`scripts/e2e.sh` log out on exit. Before that fix, 47 live admin tokens had piled up on the Railway
+server (25 Sep 2026). On Railway the admin API is reachable from the internet, so every leftover
+token is a way in. After any manual `ADMIN_TOKEN=...` login above, finish with:
+
+```bash
+curl -s -X POST -H "Authorization: Bearer $ADMIN_TOKEN" "$HS/_matrix/client/v3/logout"
+```
+
+Count the admin's sessions, then clear all of them (the token used for the call goes too, so do
+this last):
+
+```bash
+curl -s -H "Authorization: Bearer $ADMIN_TOKEN" "$HS/_synapse/admin/v2/users/@admin:<server>/devices" \
+  | python3 -c 'import json,sys;print(json.load(sys.stdin)["total"])'
+curl -s -X POST -H "Authorization: Bearer $ADMIN_TOKEN" "$HS/_matrix/client/v3/logout/all"
+```
+
+`/logout/all` is the Matrix client API: it removes every device and token of the account that
+calls it. Synapse v1.161.0 has no admin "log out all" endpoint for another user. To clear one
+teacher's sessions, the admin API is `POST /_synapse/admin/v2/users/<user>/delete_devices` with a
+`{"devices": [...]}` list (what `scripts/devices.sh prune` uses).
+
 ## Rumi's replies show a red "unverified device" shield (issue #15)
 
 Cause: the bot (matrix-bot-sdk 0.8.0) never creates cross-signing keys, so its device is

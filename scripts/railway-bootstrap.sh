@@ -96,7 +96,7 @@ log "wrote $CHANNEL_ENV (chmod 600)"
 AUTH=(-H "Authorization: Bearer $BOT_TOKEN" -H 'Content-Type: application/json')
 ENC_BOT="$(python3 -c 'import sys,urllib.parse;print(urllib.parse.quote(sys.argv[1]))' "$BOT_ID")"
 curl -fsS -X PUT "$HS/_matrix/client/v3/profile/$ENC_BOT/displayname" "${AUTH[@]}" -d '{"displayname":"Rumi"}' >/dev/null
-if [ -z "$(jget "$(curl -sS "$HS/_matrix/client/v3/profile/$ENC_BOT/avatar_url")" avatar_url)" ]; then
+if [ -z "$(jget "$(curl -sS "$HS/_matrix/client/v3/profile/$ENC_BOT/avatar_url" "${AUTH[@]}")" avatar_url)" ]; then
   MXC="$(jget "$(curl -fsS -X POST "$HS/_matrix/media/v3/upload?filename=rumi-avatar.png" -H "Authorization: Bearer $BOT_TOKEN" \
     -H 'Content-Type: image/png' --data-binary @"$ROOT/deploy/element/assets/rumi-avatar-navy.png")" content_uri)"
   curl -fsS -X PUT "$HS/_matrix/client/v3/profile/$ENC_BOT/avatar_url" "${AUTH[@]}" -d "{\"avatar_url\":\"$MXC\"}" >/dev/null

@@ -65,6 +65,19 @@ else:
     config["enable_registration_without_verification"] = True
     config["registration_requires_token"] = False
 
+# Phone-number enumeration (Railway critic, 25 Sep 2026): user ids ARE teachers' phone numbers, and
+# three unauthenticated endpoints answered "does +92300... have an account?": register/available,
+# POST /register (M_USER_IN_USE before the token stage), and GET /profile (which also returned the
+# display name). rc_registration does NOT cover register/available -- Synapse v1.161.0 hardcodes a
+# sleep-only limiter there (rest/client/register.py, ~1 req/2s per IP, delays, never rejects a
+# sequential caller). So close the oracles instead of rate-limiting them:
+# - inhibit_user_in_use_error: register/available always says available and POST /register only
+#   reports a taken name AFTER the registration-token stage, i.e. only to someone holding a token.
+# - require_auth_for_profile_requests: profiles need a login. Signed-in teachers still see each
+#   other (user directory, search_all_users above is unchanged).
+config["inhibit_user_in_use_error"] = True
+config["require_auth_for_profile_requests"] = True
+
 config["registration_shared_secret"] = os.environ["REG_SHARED_SECRET"]
 config["auto_join_rooms"] = [f"#rumi-announcements:{server_name}"]
 config["autocreate_auto_join_rooms"] = True

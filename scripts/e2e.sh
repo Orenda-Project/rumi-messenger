@@ -32,6 +32,7 @@ ELEMENT_URL="${ELEMENT_URL:-http://${BIND_ADDR}:${ELEMENT_PORT}}"
 
 PASS_COUNT=0
 FAIL_COUNT=0
+SKIP_COUNT=0
 CLEANUP_USERS=()
 
 check() {
@@ -43,6 +44,12 @@ check() {
     echo "FAIL: ${desc} (${detail:-no reason given})"
     FAIL_COUNT=$((FAIL_COUNT + 1))
   fi
+}
+# A check with nothing to test on this deployment (e.g. coturn when COTURN=off): printed, but never
+# counted as a pass -- a PASS that tested nothing inflates the total (Railway critic, 25 Sep 2026).
+skip() {
+  echo "SKIP: $1 (${2:-not applicable here})"
+  SKIP_COUNT=$((SKIP_COUNT + 1))
 }
 
 # ---------------------------------------------------------------------------
@@ -149,6 +156,10 @@ cleanup() {
           -d '{"erase": true}' >/dev/null 2>&1 || true
       fi
     done
+  fi
+  # Log the admin session out, or every e2e run leaves a live admin token behind (teacher.sh).
+  if [[ -n "${ADMIN_TOKEN:-}" ]]; then
+    curl -s -o /dev/null -X POST "${SYNAPSE_URL}/_matrix/client/v3/logout" -H "Authorization: Bearer ${ADMIN_TOKEN}" 2>/dev/null || true
   fi
 }
 trap cleanup EXIT
@@ -459,7 +470,7 @@ if [[ "${REGISTER_OK}" == "1" ]]; then
   TURN_LIVE_OK=0
   TURN_LIVE_DETAIL="skipped: no credentials to test (previous check failed)"
   if [[ "${COTURN:-on}" == "off" ]]; then
-    TURN_LIVE_OK=1; TURN_LIVE_DETAIL=""
+    :
   elif [[ "${TURN_OK}" == "1" ]]; then
     if [[ "$(docker inspect -f '{{.State.Running}}' "${COTURN_CONTAINER}" 2>/dev/null)" != "true" ]]; then
       TURN_LIVE_DETAIL="container ${COTURN_CONTAINER} not found or not running"
@@ -476,7 +487,11 @@ if [[ "${REGISTER_OK}" == "1" ]]; then
       fi
     fi
   fi
-  check "coturn is alive and honors the Synapse-issued TURN credentials (docker exec turnutils_uclient ALLOCATE)${COTURN:+ [COTURN=${COTURN}: nothing to test]}" "${TURN_LIVE_OK}" "${TURN_LIVE_DETAIL}"
+  if [[ "${COTURN:-on}" == "off" ]]; then
+    skip "coturn is alive and honors the Synapse-issued TURN credentials" "COTURN=off: no coturn deployed, nothing to test"
+  else
+    check "coturn is alive and honors the Synapse-issued TURN credentials (docker exec turnutils_uclient ALLOCATE)" "${TURN_LIVE_OK}" "${TURN_LIVE_DETAIL}"
+  fi
 
   # -------------------------------------------------------------------------
   # 7b. The call transport Synapse ADVERTISES must actually work (Element X can only call
@@ -610,7 +625,7 @@ fi
 # ---------------------------------------------------------------------------
 echo
 echo "================================================================"
-echo " e2e summary: ${PASS_COUNT} passed, ${FAIL_COUNT} failed"
+echo " e2e summary: ${PASS_COUNT} passed, ${FAIL_COUNT} failed, ${SKIP_COUNT} skipped"
 echo "================================================================"
 
 if [[ "${FAIL_COUNT}" -gt 0 ]]; then

@@ -587,7 +587,7 @@ fi
 if [[ -f "${AVATAR_FILE}" ]]; then
   NEW_HASH="$(sha256sum "${AVATAR_FILE}" | cut -d' ' -f1)"
   OLD_HASH="$(cat "${AVATAR_HASH_FILE}" 2>/dev/null || true)"
-  CURRENT_AVATAR="$(curl -fsS "http://${BIND_ADDR}:${SYNAPSE_PORT}/_matrix/client/v3/profile/${BOT_USER_ID}/avatar_url" 2>/dev/null \
+  CURRENT_AVATAR="$(curl -fsS -H "Authorization: Bearer ${BOT_TOKEN}" "http://${BIND_ADDR}:${SYNAPSE_PORT}/_matrix/client/v3/profile/${BOT_USER_ID}/avatar_url" 2>/dev/null \
     | python3 -c "import json,sys; print(json.load(sys.stdin).get('avatar_url') or '')" 2>/dev/null || true)"
   if [[ -n "${CURRENT_AVATAR}" && "${NEW_HASH}" == "${OLD_HASH}" ]]; then
     log "  avatar already set and unchanged (${CURRENT_AVATAR}), skipping upload"
