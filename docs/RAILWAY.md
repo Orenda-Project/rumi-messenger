@@ -327,6 +327,10 @@ Stated plainly, so nobody files these as bugs:
 
 ## What we tested
 
+That first deployment was taken down on 2026-10-05: the hosted Rumi Messenger now lives at
+https://chat.hellorumi.ai (its own Railway project, run with rumi-platform). The addresses below are
+dead and kept only as the record of the proof.
+
 On 2026-09-25, against `https://synapse-production-0d99.up.railway.app` and
 `https://element-production-1879.up.railway.app`:
 
