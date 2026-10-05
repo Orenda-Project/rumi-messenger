@@ -61,7 +61,7 @@ Tested means we ran it and have the output or the screenshots, not that we expec
 | One-command server (Synapse, Postgres, branded Element Web) | **Tested.** `scripts/e2e.sh` passes every check |
 | End-to-end encrypted chat | **Tested**: 1:1 and a three-teacher group, phone and web, text, photos and voice notes both ways |
 | Rumi as a contact: welcome invitation, questions, quizzes, numbered menus | **Tested** in the web app and the Android app (emulator) |
-| Rumi's media features (photos in, voice notes in, documents and images out) | **Tested** end to end on the Android app: a sent photo was analysed, a voice note was received and decrypted (transcription needs the speech API key), Rumi's files come back encrypted ([rumi-platform#104](https://github.com/Orenda-Project/rumi-platform/pull/104)) |
+| Rumi's media features (photos in, voice notes in, documents and images out) | **Tested** end to end on the Android app: a sent photo was analysed, a voice note was received and decrypted (transcription needs the speech API key), Rumi's files come back encrypted ([rumi-platform#120](https://github.com/Orenda-Project/rumi-platform/pull/120)) |
 | Lesson plans | **Blocked** on a valid Gamma API key ([#11](https://github.com/Orenda-Project/rumi-messenger/issues/11)). Without it the teacher now gets an honest failure message instead of silence |
 | Phone number as username, accounts created by the admin | **Tested** (`scripts/teacher.sh`, [#5](https://github.com/Orenda-Project/rumi-messenger/issues/5)) |
 | Find colleagues by name | **Tested** ([#10](https://github.com/Orenda-Project/rumi-messenger/issues/10)) |

@@ -221,10 +221,9 @@ Rumi is a separate service, [rumi-platform](https://github.com/Orenda-Project/ru
 signs in to your server as `@rumi`, the same way it connects to WhatsApp, Slack and Discord.
 [RUMI-INTEGRATION.md](RUMI-INTEGRATION.md) covers it step by step. In short:
 
-1. **Get rumi-platform with the Matrix channel.** Until
-   [rumi-platform PR #104](https://github.com/Orenda-Project/rumi-platform/pull/104) merges, use
-   its `feat/matrix-channel` branch. Open the PR first: if it says **Merged**, use `main`
-   instead. Set it up with that repo's own guide (`rumi setup`).
+1. **Get rumi-platform.** Its `main` branch has had the Matrix channel since v2.7.0
+   ([PR #120](https://github.com/Orenda-Project/rumi-platform/pull/120)); it needs Node 22 or
+   newer. Set it up with that repo's own guide (`rumi setup` has a Matrix step).
 2. **Copy the bot credentials across.** `setup.sh` already wrote them to `deploy/rumi-channel.env`:
 
    ```bash

@@ -37,13 +37,14 @@ What this means in practice:
 Once rumi-platform#107 is fixed, this becomes a preference rather than a requirement, and the
 constraint here can be relaxed.
 
-## Which rumi-platform branch carries this
+## Which rumi-platform version carries this
 
-The Matrix channel driver lives on rumi-platform's `feat/matrix-channel` branch (three files:
-`bot/shared/services/messaging/matrix-connection.js`, `matrix-channel.service.js`, and
-`inbound/matrix-events.adapter.js`, plus the `MATRIX_*` block in `.env.template`). PR:
-`https://github.com/Orenda-Project/rumi-platform/pull/104`. If that PR has merged to `main` by the time you read this, just use `main`
-instead -- the steps below are the same either way.
+The Matrix channel is on rumi-platform `main` since v2.7.0
+([PR #120](https://github.com/Orenda-Project/rumi-platform/pull/120), 2 Oct 2026, which carried
+[PR #104](https://github.com/Orenda-Project/rumi-platform/pull/104) plus fixes). rumi-platform needs
+Node 22 or newer; with `MATRIX_E2EE=on` (the default) the bot refuses to start if encryption cannot
+load, so a plaintext fallback never happens by accident. rumi-platform's own guide is
+`docs/channels/matrix.md` in that repo.
 
 ## Steps
 
@@ -125,9 +126,8 @@ rather than quietly serve plaintext.
 
 ### 4. Prove the roundtrip
 
-`matrix-smoke.js` ships on the `feat/matrix-channel` branch
-([PR #104](https://github.com/Orenda-Project/rumi-platform/pull/104)), not yet on rumi-platform
-`main` -- run this from that branch/worktree until the PR merges, or the script won't exist.
+`bot/scripts/matrix-smoke.js` ships on rumi-platform `main`. Stop the bot first: the script opens
+its own connection with the same token.
 
 ```bash
 MATRIX_HOMESERVER_URL=http://localhost:8008 \

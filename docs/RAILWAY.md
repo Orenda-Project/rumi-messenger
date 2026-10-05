@@ -146,8 +146,8 @@ only creates Rumi's *account* and writes its login to `deploy/railway/rumi-chann
 on Railway runs Rumi.
 
 Rumi is a separate program, [rumi-platform](https://github.com/Orenda-Project/rumi-platform). It
-talks to this server through its Matrix channel, which is still in review
-([rumi-platform#104](https://github.com/Orenda-Project/rumi-platform/pull/104), not merged). It is
+talks to this server through its Matrix channel, on rumi-platform `main` since v2.7.0
+([rumi-platform#120](https://github.com/Orenda-Project/rumi-platform/pull/120)). It is
 a long-running bot, so it has to run somewhere that stays on. Connecting it is the same on Railway
 as on a self-hosted server: rumi-platform gets `MATRIX_HOMESERVER_URL`, `MATRIX_ACCESS_TOKEN` and
 `MATRIX_USER_ID`, and only the server address differs. Follow [RUMI-INTEGRATION.md](RUMI-INTEGRATION.md),

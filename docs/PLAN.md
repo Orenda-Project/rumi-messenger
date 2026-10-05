@@ -32,7 +32,7 @@ expression of rumi-brand), branded welcome page.
 
 | # | Package | Where | Bar the critic compares against |
 |---|---|---|---|
-| A | Matrix channel driver for rumi-platform | `rumi-platform` branch `feat/matrix-channel` | The Discord driver trio + its tests. `npm test` green, parity test passes, live roundtrip against local Synapse. |
+| A | Matrix channel driver for rumi-platform | `rumi-platform` `main` (PR #120, merged 2 Oct 2026) | The Discord driver trio + its tests. `npm test` green, parity test passes, live roundtrip against local Synapse. |
 | B | Deploy stack + one-command setup + E2E script + logging | `deploy/`, `scripts/` | Fresh clone -> `scripts/setup.sh` -> `scripts/e2e.sh` passes on a clean machine with only Docker. |
 | C | Branded Element Web + Rumi placement | `deploy/element/` | Screenshot vs rumi-brand product tokens; a new user's first screen is a DM with Rumi. |
 | D | Docs: README, ARCHITECTURE, RUNBOOK, LOGGING, RUMI-INTEGRATION, MOBILE | `README.md`, `docs/` | rumi-platform's own README/CLAUDE.md quality (same org); every command in the docs actually runs. |
