@@ -52,7 +52,7 @@ Neither Element X nor FluffyChat can push-notify a phone about a new message wit
 gateway sitting between your homeserver and Apple/Google's push services -- self-hosting Matrix
 does not give you this for free. Two paths:
 
-- **Sygnal + your own FCM/APNs keys.** [Sygnal](https://github.com/matrix-org/sygnal) is
+- **Sygnal + your own FCM/APNs keys.** [Sygnal](https://github.com/element-hq/sygnal) is
   Matrix's own reference push gateway. Point Synapse's `push` config at a Sygnal instance you run,
   and Sygnal at Firebase Cloud Messaging (Android) and Apple Push Notification service (iOS)
   credentials you provision yourself. This is the most control, and the most setup -- an FCM
