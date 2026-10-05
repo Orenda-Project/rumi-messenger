@@ -20,11 +20,16 @@ flag them.
 
 | Component | Licence | Obligation | How we meet it |
 |---|---|---|---|
-| Synapse, Element Web, Element X Android, Sygnal, lk-jwt-service, Element Call | AGPL-3.0 (Element relicensed from Apache-2.0 in Dec 2023) | If you modify it and run it as a network service or hand it to users, publish your modified source under AGPL-3.0 and keep the notices | Both our forks are public: [Orenda-Project/rumi-messenger](https://github.com/Orenda-Project/rumi-messenger) (configuration, no code changes to Synapse or Element Web) and [Orenda-Project/element-x-android](https://github.com/Orenda-Project/element-x-android) (branch `rumi-brand`, AGPL-3.0, every change visible). **They must stay public.** |
-| LiveKit, ntfy, Caddy | Apache-2.0 | Keep copyright and licence notices | Unmodified official images; credited in the README |
+| Synapse, Element Web, Element X Android (incl. its embedded Element Call and Compound design tokens), lk-jwt-service | AGPL-3.0, dual-licensed: free under AGPL-3.0 or a paid Element Commercial License (licensing@element.io) | If you modify it and run it as a network service or hand it to users, publish your modified source under AGPL-3.0 and keep the notices | Both our forks are public: [Orenda-Project/rumi-messenger](https://github.com/Orenda-Project/rumi-messenger) (configuration, no code changes to Synapse or Element Web) and [Orenda-Project/element-x-android](https://github.com/Orenda-Project/element-x-android) (branch `rumi-brand`, AGPL-3.0, every change visible). **They must stay public.** |
+| LiveKit, ntfy (Apache-2.0 or GPL-2.0, your choice), Caddy, Sygnal, matrix-rust-sdk | Apache-2.0 | Keep copyright and licence notices | Unmodified official images; credited in the README |
 | coturn | BSD-3-Clause | Keep notices | Unmodified official image; credited |
 | PostgreSQL | PostgreSQL licence | None | Unmodified |
 | This repository's own scripts and docs, and Rumi's Matrix channel in rumi-platform | Apache-2.0 | None for users | Our code talks to Synapse over its public API; it is not a derivative of AGPL code |
+
+Two leftovers to keep clean (checked 2026-10-05): the Android build still points its bug-report
+button at Element's `rageshakes.element.io` (set `BUG_REPORT_URL` to our own or empty), and
+`deploy/element/config.json` `mobile_builds` still links Element's own Play Store and App Store
+listings instead of our APK release (set to our release URL, `ios` to null).
 
 If a school ever wants to keep private changes to Synapse or the app, the AGPL does not allow that.
 Element sells an alternative licence for exactly that case (see their AGPL announcement); we have
